@@ -1,0 +1,79 @@
+configuration {
+    font: "monospace 11";
+    show-icons: true;
+    icon-theme: "Papirus";
+    disable-history: false;
+    sort: true;
+}
+
+* {
+    /* Base colors */
+    background:       #1e1e2e88;
+    background-alt:   #1e1e2e88;
+    foreground:       #cdd6f4;
+    foreground-alt:   #f9e2af;
+
+    /* Accents */
+    selected:         #89b4fa;
+    active:           #a6e3a1;
+    urgent:           #f38ba8;
+
+    /* Borders */
+    border:           #45475a;
+    border-alt:       #89b4fa;
+}
+
+window {
+    transparency: "real";
+    background-color: @background;
+    text-color: @foreground;
+    border: 2px;
+    border-color: @border;
+    border-radius: 10px;
+    padding: 20px;
+    width: 600px;
+    location: center;
+}
+
+mainbox {
+    background-color: @background;
+    padding: 10px;
+}
+
+inputbar {
+    background-color: @background-alt;
+    text-color: @foreground;
+    padding: 12px;
+    border-radius: 8px;
+    border: 2px 0 2px 0;
+    border-color: @border;
+}
+
+listview {
+    background-color: @background;
+    text-color: @foreground;
+    padding: 10px;
+    lines: 10;
+    columns: 1;
+}
+
+element {
+    padding: 8px 12px;
+    border: 0;
+    text-color: inherit;
+    background-color: inherit;
+}
+
+element selected.normal, element selected.active {
+    background-color: @selected;
+    text-color: @background;
+}
+
+element urgent {
+    text-color: @urgent;
+}
+
+element-icon {
+    size: 24px;
+    padding: 0 10px 0 0;
+}

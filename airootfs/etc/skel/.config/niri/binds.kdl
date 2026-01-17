@@ -1,0 +1,211 @@
+// This config is in the KDL format: https://kdl.dev
+// "/-" comments out the following node.
+// Check the wiki for a full description of the configuration:
+// https://github.com/YaLTeR/niri/wiki/Configuration:-Overview
+
+// Input device configuration.
+// Find the full list of options on the wiki:
+// https://github.com/YaLTeR/niri/wiki/Configuration:-Input
+
+binds {
+    // Keys consist of modifiers separated by + signs, followed by an XKB key name
+    // in the end. To find an XKB name for a particular key, you may use a program
+    // like wev.
+    //
+    // "Mod" is a special modifier equal to Super when running on a TTY, and to Alt
+    // when running as a winit window.
+    //
+    // Most actions that you can bind here can also be invoked programmatically with
+    // `niri msg action do-something`.
+
+    // Mod-Shift-/, which is usually the same as Mod-?,
+    // shows a list of important hotkeys.
+    Mod+Shift+Slash { show-hotkey-overlay; }
+
+    // Binds for Launching Apps
+    Mod+Return { spawn "kitty"; } //open terminal
+    Mod+D { spawn "bash" "-c" "$HOME/.config/rofi/applets/bin/launcher.sh"; } // Application Launcher
+    Mod+E { spawn "kitty" "spf"; } // Open File Explorer
+    Mod+shift+E { spawn "kitty" "sudo" "spf"; } // Open File Explorer
+    Mod+V { spawn "zen-browser"; } // Open Browser
+    Mod+shift+V { spawn "zen-browser --private-window"; } // Open Browser Private
+    Mod+A {spawn "kitty" "btop";} // btop activity viewer
+    Mod+P {spawn "bitwarden-desktop";} // password manager
+    Mod+N {spawn "kitty" "nvim";} //neovim I want to learn it so might as well
+    Mod+U {spawn "zen-browser" "perplexity.ai";} //perplexity is free for the year so it wins for my AI shortcut
+    Mod+O {spawn "kitty" "lazydocker";} //lazy docker
+    Mod+G {spawn "obsidian";} // obsidian
+    Mod+S {spawn "localsend";} //localsend
+
+
+
+    // You can also use a shell. Do this if you need pipes, multiple commands, etc.
+    // Note: the entire command goes as a single argument in the end.
+    // Mod+T { spawn "bash" "-c" "notify-send hello && exec alacritty"; }
+
+    // Example volume keys mappings for PipeWire & WirePlumber.
+    // The allow-when-locked=true property makes them work even when the session is locked.
+    XF86AudioRaiseVolume allow-when-locked=true { spawn "wpctl" "set-volume" "@DEFAULT_AUDIO_SINK@" "0.1+"; }
+    XF86AudioLowerVolume allow-when-locked=true { spawn "wpctl" "set-volume" "@DEFAULT_AUDIO_SINK@" "0.1-"; }
+    XF86AudioMute        allow-when-locked=true { spawn "wpctl" "set-mute" "@DEFAULT_AUDIO_SINK@" "toggle"; }
+    XF86AudioMicMute     allow-when-locked=true { spawn "wpctl" "set-mute" "@DEFAULT_AUDIO_SOURCE@" "toggle"; }
+    XF86AudioNext        allow-when-locked=true { spawn "playerctl" "next"; }
+    XF86AudioPrev        allow-when-locked=true { spawn "playerctl" "previous"; }
+    XF86AudioPlay        allow-when-locked=true { spawn "playerctl" "play-pause"; }
+
+    Mod+Q { close-window; } // Close window
+    Mod+Escape {spawn "~/.config/rofi/powermenu/type-1/powermenu.sh";} // Open Log out menu
+
+
+    Mod+Shift+W { spawn "bash" "-c" "$HOME/.config/walls/toggle-walls.sh"; } // Change Wallpaper && Theme Later
+    Mod+Tab repeat=false { toggle-overview; }
+
+    // Move the focused window between the floating and the tiling layout.
+    Mod+Space        { toggle-window-floating; }
+    Mod+Shift+Space { switch-focus-between-floating-and-tiling; }
+
+    // Full Screen Actions
+    Mod+F { maximize-column; }
+    Mod+Shift+F { fullscreen-window; }
+
+    // You can refer to workspaces by index. However, keep in mind that
+    // niri is a dynamic workspace system, so these commands are kind of
+    // "best effort". Trying to refer to a workspace index bigger than
+    // the current workspace count will instead refer to the bottommost
+    // (empty) workspace.
+    //
+    // For example, with 2 workspaces + 1 empty, indices 3, 4, 5 and so on
+    // will all refer to the 3rd workspace.
+    Mod+1 { focus-workspace 1; }
+    Mod+2 { focus-workspace 2; }
+    Mod+3 { focus-workspace 3; }
+    Mod+4 { focus-workspace 4; }
+    Mod+5 { focus-workspace 5; }
+    Mod+6 { focus-workspace 6; }
+    Mod+7 { focus-workspace 7; }
+    Mod+8 { focus-workspace 8; }
+    Mod+9 { focus-workspace 9; }
+    Mod+Ctrl+1 { move-column-to-workspace 1; }
+    Mod+Ctrl+2 { move-column-to-workspace 2; }
+    Mod+Ctrl+3 { move-column-to-workspace 3; }
+    Mod+Ctrl+4 { move-column-to-workspace 4; }
+    Mod+Ctrl+5 { move-column-to-workspace 5; }
+    Mod+Ctrl+6 { move-column-to-workspace 6; }
+    Mod+Ctrl+7 { move-column-to-workspace 7; }
+    Mod+Ctrl+8 { move-column-to-workspace 8; }
+    Mod+Ctrl+9 { move-column-to-workspace 9; }
+    Mod+Shift+Tab {focus-workspace-up;}
+    Mod+ctrl+Tab {focus-workspace-down;}
+
+    // Move or focus left right 
+    Mod+j  { focus-column-or-monitor-left; }
+    Mod+l { focus-column-or-monitor-right; }
+    Mod+Shift+j     { move-column-left-or-to-monitor-left; }
+    Mod+Shift+L     { move-column-right-or-to-monitor-right; }
+    Mod+Ctrl+H     { focus-monitor-left; }
+    Mod+Ctrl+L     { focus-monitor-right; }
+    Mod+Shift+Ctrl+j  { move-column-to-monitor-left; }
+    Mod+Shift+Ctrl+l { move-column-to-monitor-right; }
+    //Mod+Shift+Left  { focus-monitor-left; }
+    //Mod+Shift+Right { focus-monitor-right; }
+    //Mod+Shift+Ctrl+Left  { move-column-to-monitor-left; }
+    //Mod+Shift+Ctrl+Right { move-column-to-monitor-right; }
+
+    // move or focus up down
+     Mod+k     { focus-window-or-workspace-down; }
+     Mod+i     { focus-window-or-workspace-up; }
+     Mod+Shift+k     { move-column-to-workspace-down; }
+     Mod+Shift+i     { move-column-to-workspace-up; }
+     Mod+Ctrl+k     { focus-monitor-down; }
+     Mod+Ctrl+i     { focus-monitor-up; }
+     Mod+Shift+Ctrl+k  { move-column-to-monitor-down; }
+     Mod+Shift+Ctrl+i    { move-column-to-monitor-up; }
+     //Mod+Ctrl+Page_Down { move-column-to-workspace-down; }
+     //Mod+Ctrl+Page_Up   { move-column-to-workspace-up; }
+     //Mod+down     { focus-window-or-workspace-down; }
+     //MoD+up       {  focus-window-or-workspace-up; }
+     //Mod+shift+Down  { focus-monitor-down; }
+     //Mod+Shift+Up    { focus-monitor-up; }
+     //Mod+Shift+Ctrl+Down  { move-column-to-monitor-down; }
+     //Mod+Shift+Ctrl+Up    { move-column-to-monitor-up; }
+     //Mod+Page_Down { move-workspace-down; }
+     //Mod+Page_Up   { move-workspace-up; }
+
+    // Move or  Focus Columns between First and Last
+    Mod+Home { focus-column-first; }
+    Mod+End  { focus-column-last; }
+    Mod+Shift+Home { move-column-to-first; }
+    Mod+Shift+End  { move-column-to-last; }
+
+    // Consume or Expel a single window to the side.
+    Mod+BracketLeft  { consume-or-expel-window-left; }
+    Mod+BracketRight { consume-or-expel-window-right; }
+    Mod+Comma  { consume-window-into-column; }
+    Mod+Period { expel-window-from-column; }
+
+    // Finer width adjustments.
+    // This command can also:
+    // * set width in pixels: "1000"
+    // * adjust width in pixels: "-5" or "+5"
+    // * set width as a percentage of screen width: "25%"
+    // * adjust width as a percentage of screen width: "-10%" or "+10%"
+    // Pixel sizes use logical, or scaled, pixels. I.e. on an output with scale 2.0,
+    // set-column-width "100" will make the column occupy 200 physical screen pixels.
+    Mod+Minus { set-column-width "-10%"; }
+    Mod+Equal { set-column-width "+10%"; }
+    Mod+Shift+Minus { set-window-height "-10%"; }
+    Mod+Shift+Equal { set-window-height "+10%"; }
+
+    // You can bind mouse wheel scroll ticks using the following syntax.
+    // These binds will change direction based on the natural-scroll setting.
+    //
+    // To avoid scrolling through workspaces really fast, you can use
+    // the cooldown-ms property. The bind will be rate-limited to this value.
+    // You can set a cooldown on any bind, but it's most useful for the wheel.
+    Mod+WheelScrollDown      cooldown-ms=150 { focus-workspace-down; }
+    Mod+WheelScrollUp        cooldown-ms=150 { focus-workspace-up; }
+    Mod+Ctrl+WheelScrollDown cooldown-ms=150 { move-column-to-workspace-down; }
+    Mod+Ctrl+WheelScrollUp   cooldown-ms=150 { move-column-to-workspace-up; }
+    Mod+Shift+WheelScrollDown      { focus-column-right; }
+    Mod+Shift+WheelScrollUp        { focus-column-left; }
+    Mod+Ctrl+Shift+WheelScrollDown { move-column-right; }
+    Mod+Ctrl+Shift+WheelScrollUp   { move-column-left; }
+
+
+
+    // Similarly, you can bind touchpad scroll "ticks".
+    // Touchpad scrolling is continuous, so for these binds it is split into
+    // discrete intervals.
+    // These binds are also affected by touchpad's natural-scroll, so these
+    // example binds are "inverted", since we have natural-scroll enabled for
+    // touchpads by default.
+    // Mod+TouchpadScrollDown { spawn "wpctl" "set-volume" "@DEFAULT_AUDIO_SINK@" "0.02+"; }
+    // Mod+TouchpadScrollUp   { spawn "wpctl" "set-volume" "@DEFAULT_AUDIO_SINK@" "0.02-"; }
+
+    Mod+R { switch-preset-column-width; }
+    Mod+Ctrl+R { reset-window-height; }
+
+    Mod+C { center-column; }
+
+    // Actions to switch layouts.
+    // Note: if you uncomment these, make sure you do NOT have
+    // a matching layout switch hotkey configured in xkb options above.
+    // Having both at once on the same hotkey will break the switching,
+    // since it will switch twice upon pressing the hotkey (once by xkb, once by niri).
+    // Mod+Space       { switch-layout "next"; }
+    // Mod+Shift+Space { switch-layout "prev"; }
+
+    Print { screenshot; }
+    Mod+Shift+S { screenshot; }
+    Ctrl+Print { screenshot-screen; }
+    Alt+Print { screenshot-window; }
+    Mod+Shift+R { spawn "fish" "-c" "wl-screenrec -f ~/Videos/Screenrecs/screenrec-$(math 1 + $(ls ~/Videos/Screenrecs/ | count)).mp4 -g $(slurp -d -F \"Mononoki Nerd Font Mono\" -c \"#8bf6d4\") -b 3MB --audio --audio-device alsa_output.pci-0000_08_00.3.analog-stereo.monitor"; }
+    Mod+Shift+Ctrl+R { spawn "fish" "-c" "killall wl-screenrec && notify-send \"wl-screenrec\" \"Finished recording.\""; }
+
+    // The quit action will show a confirmation dialog to avoid accidental exits.
+    Mod+Shift+q { quit; }
+
+    // Powers off the monitors. To turn them back on, do any input like
+    // moving the mouse or pressing any other key.
+    Mod+Shift+P { power-off-monitors; }
+}

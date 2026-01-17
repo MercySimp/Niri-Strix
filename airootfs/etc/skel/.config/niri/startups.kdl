@@ -1,0 +1,19 @@
+// This config is in the KDL format: https://kdl.dev
+// "/-" comments out the following node.
+// Check the wiki for a full description of the configuration:
+// https://github.com/YaLTeR/niri/wiki/Configuration:-Overview
+
+// Add lines like this to spawn processes at startup.
+// Note that running niri as a session supports xdg-desktop-autostart,
+// which may be more convenient to use.
+// See the binds section below for more spawn examples.
+spawn-at-startup "waybar"
+spawn-at-startup "materialgram"
+spawn-at-startup "vesktop"
+spawn-at-startup "swww-daemon"
+spawn-at-startup "dunst"
+spawn-at-startup "$HOME/.config/walls/toggle-walls.sh"
+spawn-at-startup "xwayland-satellite"
+spawn-at-startup "/usr/lib/polkit-kde-authentication-agent-1"
+spawn-at-startup "$HOME/.config/sway/idle"
+// --panscan=1.0

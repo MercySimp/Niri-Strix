@@ -1,0 +1,16 @@
+/**
+ *
+ * Author : Aditya Shakya (adi1090x)
+ * Github : @adi1090x
+ * 
+ * Colors
+ **/
+
+* {
+    background: hsl(218, 100.00%, 5.90%);
+    background-alt:hsl(218, 60.00%, 9.80%);
+    foreground:hsl(183, 90.40%, 40.80%);
+    selected:       #0ABDC6FF;
+    active: #00a138ff;
+    urgent:hsl(8, 78.50%, 42.00%);
+}

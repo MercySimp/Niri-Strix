@@ -1,0 +1,53 @@
+// This config is in the KDL format: https://kdl.dev
+// "/-" comments out the following node.
+// Check the wiki for a full description of the configuration:
+// https://github.com/YaLTeR/niri/wiki/Configuration:-Overview
+
+// Window rules let you adjust behavior for individual windows.
+// Find more information on the wiki:
+// https://github.com/YaLTeR/niri/wiki/Configuration:-Window-Rules
+
+
+
+window-rule {
+    min-height 400
+    min-width 420
+}
+
+
+window-rule {
+    draw-border-with-background false
+    opacity 0.95
+}
+window-rule {
+    match app-id="floating"
+    open-floating true
+    default-column-width { proportion 0.33; }
+    default-window-height { fixed 750; }
+
+}
+
+window-rule {
+    geometry-corner-radius 12
+    clip-to-geometry true
+}
+
+environment {
+    DISPLAY ":1"
+    ELECTRON_OZONE_PLATFORM_HINT "auto"
+    GDK_SCALE "1.5"
+}
+
+layer-rule {
+    match namespace="waybar"
+    match at-startup=true
+
+    opacity 0.8
+
+    geometry-corner-radius 10
+}
+
+layer-rule {
+    match namespace="swww-daemon"
+    place-within-backdrop true
+}
