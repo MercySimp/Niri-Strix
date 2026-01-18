@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034
 
-iso_name="strix-arch-niri"
+iso_name="strix-niri"
 iso_label="ARCH_$(date --date="@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%Y%m)"
 iso_publisher="Arch Linux <https://archlinux.org>"
-iso_application="Arch Linux Live/Rescue DVD"
+iso_application="Niri Strix Build ISO"
 iso_version="$(date --date="@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%Y.%m.%d)"
 install_dir="arch"
 buildmodes=('iso')
 bootmodes=('bios.syslinux'
-           'uefi.systemd-boot')
+           'uefi.grub')
 pacman_conf="pacman.conf"
 airootfs_image_type="squashfs"
 airootfs_image_tool_options=('-comp' 'xz' '-Xbcj' 'x86' '-b' '1M' '-Xdict-size' '1M')
