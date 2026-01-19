@@ -1,12 +1,12 @@
 #!/bin/bash
-# Custom Arch Installer TUI - Wraps archinstall with user-friendly menus
-# Uses whiptail for arrow-key navigable menus
+# Custom Arch Installer TUI using gum
+# Front-end for archinstall (linux-zen + Limine + Btrfs + optional LUKS)
 
 set -eEo pipefail
 
-# ============================================================
-# VARIABLES (populated by user selections)
-# ============================================================
+# -----------------------------
+# State
+# -----------------------------
 DISK=""
 HOSTNAME=""
 USERNAME=""
@@ -14,200 +14,331 @@ FULLNAME=""
 EMAIL=""
 TIMEZONE=""
 KEYMAP=""
-ENCRYPT=""
+ENCRYPT=""   # "Yes"/"No"
 USERPASS=""
 
-# ============================================================
-# HELPER FUNCTIONS
-# ============================================================
-msg_box() {
-    whiptail --title "$1" --msgbox "$2" 10 60
+# -----------------------------
+# Helpers
+# -----------------------------
+pause() { gum confirm "Continue?" >/dev/null || exit 1; }
+
+banner() {
+  gum style --border normal --margin "1 2" --padding "1 2" \
+    --border-foreground 212 "$(cat <<'EOF'
+   ▄████████     ███        ▄████████  ▄█  ▀████    ▐████▀ 
+  ███    ███ ▀█████████▄   ███    ███ ███    ███▌   ████▀  
+  ███    █▀     ▀███▀▀██   ███    ███ ███▌    ███  ▐███    
+  ███            ███   ▀  ▄███▄▄▄▄██▀ ███▌    ▀███▄███▀    
+▀███████████     ███     ▀▀███▀▀▀▀▀   ███▌    ████▀██▄     
+         ███     ███     ▀███████████ ███    ▐███  ▀███    
+   ▄█    ███     ███       ███    ███ ███   ▄███     ███▄  
+ ▄████████▀     ▄████▀     ███    ███ █▀   ████       ███▄ 
+                           ███    ███                      
+EOF
+)"
 }
 
-input_box() {
-    local title="$1" prompt="$2" default="${3:-}"
-    whiptail --title "$title" --inputbox "$prompt" 10 60 "$default" 3>&1 1>&2 2>&3
+summary() {
+  gum style --margin "1 2" --padding "0 2" --border normal --border-foreground 240 \
+"Disk:       ${DISK:-<not set>}
+Hostname:   ${HOSTNAME:-<not set>}
+Username:   ${USERNAME:-<not set>}
+Full name:  ${FULLNAME:-<not set>}
+Email:      ${EMAIL:-<not set>}
+Timezone:   ${TIMEZONE:-<not set>}
+Keymap:     ${KEYMAP:-<not set>}
+Encryption: ${ENCRYPT:-<not set>}"
 }
 
-password_box() {
-    local title="$1" prompt="$2"
-    whiptail --title "$title" --passwordbox "$prompt" 10 60 3>&1 1>&2 2>&3
+# -----------------------------
+# Input sections
+# -----------------------------
+pick_disk() {
+  echo "Scanning disks..."
+
+  # Always get full /dev paths (-p / --paths behavior) so later lsblk calls work
+  mapfile -t disk_lines < <(lsblk -dpno NAME,SIZE,MODEL | grep -E '^/dev/(nvme|sd|vd)')
+
+  ((${#disk_lines[@]})) || { gum style --foreground 196 "No disks found."; return 1; }
+
+  local choices=()
+  for line in "${disk_lines[@]}"; do
+    local disk size model
+    disk=$(awk '{print $1}' <<<"$line")
+    size=$(awk '{print $2}' <<<"$line")
+    model=$(cut -d' ' -f3- <<<"$line")
+
+    # Build an OS hint based on partition FS types
+    local os_hint="Empty"
+    while read -r p fstype _; do
+      case "$fstype" in
+        ntfs) os_hint="Windows" ;;
+        vfat) [[ "$os_hint" == "Empty" ]] && os_hint="EFI/Boot" ;;
+        ext4|ext3|btrfs|xfs|f2fs) [[ "$os_hint" != "Windows" ]] && os_hint="Linux" ;;
+      esac
+    done < <(lsblk -pnro NAME,FSTYPE "$disk" | tail -n +2)
+
+    local part_count
+    part_count=$(lsblk -pnro NAME "$disk" | tail -n +2 | wc -l)
+
+    choices+=("$disk  ($size)  $model  |  $part_count partitions  |  $os_hint")
+  done
+
+  local sel
+  sel=$(printf '%s\n' "${choices[@]}" | gum choose --height 12 --header "Select installation disk (will be wiped)")
+  DISK=$(awk '{print $1}' <<<"$sel")
+
+  # Show a detailed preview for confirmation
+  local detail
+  detail=$(lsblk -p -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,PARTTYPE "$DISK")
+  gum style --border normal --padding "1 2" "$detail"
+
+  gum confirm "ERASE ALL DATA ON $DISK and continue?" --default=false || { DISK=""; return 1; }
 }
 
-# ============================================================
-# SELECTION MENUS
-# ============================================================
-select_disk() {
-    local disks=()
-    while read -r name size model; do
-        disks+=("/dev/$name" "$size $model")
-    done < <(lsblk -d -n -o NAME,SIZE,MODEL | grep -E '^(nvme|sd|vd)')
-    
-    DISK=$(whiptail --title "Select Disk" --menu "Choose installation target:" 20 70 10 "${disks[@]}" 3>&1 1>&2 2>&3)
+pick_timezone() {
+  mapfile -t choices <<EOF
+America/New_York  [Eastern US]
+America/Chicago   [Central US]
+America/Denver    [Mountain US]
+America/Los_Angeles [Pacific US]
+America/Anchorage [Alaska]
+Pacific/Honolulu  [Hawaii]
+Europe/London     [UK]
+Europe/Paris      [Central Europe]
+Europe/Berlin     [Germany]
+Asia/Tokyo        [Japan]
+Asia/Shanghai     [China]
+Australia/Sydney  [Australia East]
+UTC               [UTC]
+EOF
+
+  sel=$(printf '%s\n' "${choices[@]}" | gum choose --height 12 --header "Select timezone")
+  TIMEZONE=${sel%% *}
 }
 
-select_timezone() {
-    local zones=(
-        "America/New_York" "Eastern US"
-        "America/Chicago" "Central US"
-        "America/Denver" "Mountain US"
-        "America/Los_Angeles" "Pacific US"
-        "America/Anchorage" "Alaska"
-        "Pacific/Honolulu" "Hawaii"
-        "Europe/London" "UK"
-        "Europe/Paris" "Central Europe"
-        "Europe/Berlin" "Germany"
-        "Asia/Tokyo" "Japan"
-        "Asia/Shanghai" "China"
-        "Australia/Sydney" "Australia East"
-        "UTC" "UTC"
-    )
-    TIMEZONE=$(whiptail --title "Select Timezone" --menu "Choose your timezone:" 20 60 12 "${zones[@]}" 3>&1 1>&2 2>&3)
+pick_keymap() {
+  mapfile -t choices <<EOF
+us       [US English]
+uk       [UK English]
+de       [German]
+fr       [French]
+es       [Spanish]
+it       [Italian]
+pt       [Portuguese]
+ru       [Russian]
+jp106    [Japanese]
+dvorak   [Dvorak]
+colemak  [Colemak]
+EOF
+
+  sel=$(printf '%s\n' "${choices[@]}" | gum choose --height 12 --header "Select keyboard layout")
+  KEYMAP=${sel%% *}
 }
 
-select_keymap() {
-    local keymaps=(
-        "us" "US English"
-        "uk" "UK English"
-        "de" "German"
-        "fr" "French"
-        "es" "Spanish"
-        "it" "Italian"
-        "pt" "Portuguese"
-        "ru" "Russian"
-        "jp106" "Japanese"
-        "dvorak" "Dvorak"
-        "colemak" "Colemak"
-    )
-    KEYMAP=$(whiptail --title "Select Keyboard Layout" --menu "Choose your keyboard layout:" 20 60 12 "${keymaps[@]}" 3>&1 1>&2 2>&3)
+pick_encryption() {
+  ENCRYPT=$(printf '%s\n' "Yes" "No" | gum choose --header "Enable LUKS encryption for root?")
 }
 
-select_encryption() {
-    if whiptail --title "Disk Encryption" --yesno "Enable LUKS disk encryption?\n\nThis will encrypt your root partition." 10 60; then
-        ENCRYPT="y"
-    else
-        ENCRYPT="n"
-    fi
+enter_strings() {
+  HOSTNAME=$(gum input --placeholder "Hostname" --value "${HOSTNAME:-}" --header "Enter hostname")
+  USERNAME=$(gum input --placeholder "Username" --value "${USERNAME:-}" --header "Enter username")
+  FULLNAME=$(gum input --placeholder "Full name (for git)" --value "${FULLNAME:-}" --header "Enter full name")
+  EMAIL=$(gum input --placeholder "Email (for git)" --value "${EMAIL:-}" --header "Enter email")
 }
 
-# ============================================================
-# MAIN MENU
-# ============================================================
-show_main_menu() {
-    while true; do
-        local choice
-        choice=$(whiptail --title "Arch Linux Installer" --menu "Configure your installation:\n\nUse arrow keys to navigate, Enter to select" 22 70 12 \
-            "1" "Disk:        ${DISK:-Not set}" \
-            "2" "Hostname:    ${HOSTNAME:-Not set}" \
-            "3" "Username:    ${USERNAME:-Not set}" \
-            "4" "Full Name:   ${FULLNAME:-Not set}" \
-            "5" "Email:       ${EMAIL:-Not set}" \
-            "6" "Password:    ${USERPASS:+********}" \
-            "7" "Timezone:    ${TIMEZONE:-Not set}" \
-            "8" "Keyboard:    ${KEYMAP:-Not set}" \
-            "9" "Encryption:  ${ENCRYPT:-Not set}" \
-            "I" ">>> Install <<<" \
-            "Q" "Quit" \
-            3>&1 1>&2 2>&3) || exit 0
-
-        case "$choice" in
-            1) select_disk ;;
-            2) HOSTNAME=$(input_box "Hostname" "Enter hostname:" "$HOSTNAME") ;;
-            3) USERNAME=$(input_box "Username" "Enter username:" "$USERNAME") ;;
-            4) FULLNAME=$(input_box "Full Name" "Enter full name (for git):" "$FULLNAME") ;;
-            5) EMAIL=$(input_box "Email" "Enter email (for git):" "$EMAIL") ;;
-            6)
-                USERPASS=$(password_box "Password" "Enter password:")
-                local pass2
-                pass2=$(password_box "Confirm Password" "Confirm password:")
-                if [[ "$USERPASS" != "$pass2" ]]; then
-                    msg_box "Error" "Passwords do not match!"
-                    USERPASS=""
-                fi
-                ;;
-            7) select_timezone ;;
-            8) select_keymap ;;
-            9) select_encryption ;;
-            I) run_install ;;
-            Q) exit 0 ;;
-        esac
-    done
+enter_password() {
+  while true; do
+    p1=$(gum input --password --header "Enter password for $USERNAME")
+    p2=$(gum input --password --header "Confirm password")
+    [[ "$p1" == "$p2" ]] && { USERPASS="$p1"; break; }
+    gum style --foreground 196 "Passwords do not match, try again."
+  done
 }
 
-# ============================================================
-# VALIDATION + INSTALL
-# ============================================================
-run_install() {
-    local missing=()
-    [[ -z "$DISK" ]] && missing+=("Disk")
-    [[ -z "$HOSTNAME" ]] && missing+=("Hostname")
-    [[ -z "$USERNAME" ]] && missing+=("Username")
-    [[ -z "$FULLNAME" ]] && missing+=("Full Name")
-    [[ -z "$EMAIL" ]] && missing+=("Email")
-    [[ -z "$USERPASS" ]] && missing+=("Password")
-    [[ -z "$TIMEZONE" ]] && missing+=("Timezone")
-    [[ -z "$KEYMAP" ]] && missing+=("Keyboard")
-    [[ -z "$ENCRYPT" ]] && missing+=("Encryption")
-
-    if [[ ${#missing[@]} -gt 0 ]]; then
-        msg_box "Missing Fields" "Please configure:\n${missing[*]}"
-        return
-    fi
-
-    if ! whiptail --title "Confirm Installation" --yesno "Ready to install:\n\nDisk: $DISK\nHostname: $HOSTNAME\nUser: $USERNAME\nTimezone: $TIMEZONE\nKeyboard: $KEYMAP\nEncryption: $ENCRYPT\n\nWARNING: $DISK will be ERASED!" 18 60; then
-        return
-    fi
-
-    loadkeys "$KEYMAP" 2>/dev/null || true
-    generate_config
-    archinstall --config /tmp/archinstall.json --creds /tmp/creds.json
-    post_install
-    msg_box "Complete" "Installation finished!\nRemove USB and reboot."
-}
-
+# -----------------------------
+# Config + install
+# -----------------------------
 generate_config() {
-    cat > /tmp/archinstall.json <<EOF
+  # Basic archinstall JSON (uses default layout, Linux-zen, Limine, no swap)
+  cat > /tmp/archinstall.json <<EOF
 {
-    "config_version": "2.6.0",
-    "hostname": "$HOSTNAME",
-    "timezone": "$TIMEZONE",
-    "keyboard-layout": "$KEYMAP",
-    "kernels": ["linux-zen"],
-    "bootloader": "limine",
-    "audio_config": {"audio": "pipewire"},
-    "disk_config": {
-        "config_type": "default_layout",
-        "device_modifications": [{"device": "$DISK", "wipe": true}]
-    },
-    "disk_encryption": $(if [[ "$ENCRYPT" == "y" ]]; then echo '{"encryption_type": "luks"}'; else echo 'null'; fi),
-    "swap": false,
-    "nic": {"type": "nm"}
+  "config_version": "3.1.5",
+  "hostname": "$HOSTNAME",
+  "timezone": "$TIMEZONE",
+  "keyboard-layout": "$KEYMAP",
+  "kernels": ["linux-zen"],
+  "bootloader": "limine",
+  "audio_config": { "audio": "pipewire" },
+  "disk_config": {
+    "config_type": "default_layout",
+    "device_modifications": [
+      { "device": "$DISK", "wipe": true }
+    ]
+  },
+  "disk_encryption": $( [[ "$ENCRYPT" == "Yes" ]] && \
+    echo '{"encryption_type": "luks"}' || echo "null"),
+  "swap": false,
+  "nic": { "type": "nm" }
 }
 EOF
 
-    cat > /tmp/creds.json <<EOF
-{"!users": [{"username": "$USERNAME", "!password": "$USERPASS", "sudo": true}]}
+  cat > /tmp/creds.json <<EOF
+{
+  "!users": [
+    {
+      "username": "$USERNAME",
+      "!password": "$USERPASS",
+      "sudo": true
+    }
+  ]
+}
 EOF
 }
 
 post_install() {
-    local root_dev="${DISK}p2"
-    [[ "$DISK" =~ ^/dev/sd ]] && root_dev="${DISK}2"
-    [[ "$ENCRYPT" == "y" ]] && root_dev="/dev/mapper/cryptroot"
+  # crude but works for your layout: root partition = second partition or cryptroot
+  if [[ "$ENCRYPT" == "Yes" ]]; then
+    ROOT_DEV="/dev/mapper/cryptroot"
+  else
+    ROOT_DEV="${DISK}p2"
+    [[ "$DISK" =~ ^/dev/sd ]] && ROOT_DEV="${DISK}2"
+  fi
 
-    mount "$root_dev" /mnt 2>/dev/null || true
-    arch-chroot /mnt /bin/bash <<CHROOT
-su - $USERNAME -c "git config --global user.name \"$FULLNAME\""
-su - $USERNAME -c "git config --global user.email \"$EMAIL\""
+  mount "$ROOT_DEV" /mnt 2>/dev/null || true
+  arch-chroot /mnt /bin/bash <<CHROOT
+su - "$USERNAME" -c "git config --global user.name \"$FULLNAME\""
+su - "$USERNAME" -c "git config --global user.email \"$EMAIL\""
+echo "KEYMAP=$KEYMAP" > /etc/vconsole.conf
 CHROOT
-    umount /mnt 2>/dev/null || true
+  umount /mnt 2>/dev/null || true
 }
 
-# ============================================================
-# ENTRY POINT
-# ============================================================
-clear
-msg_box "Welcome" "Welcome to the Custom Arch Installer!\n\nThis will install Arch Linux with:\n- linux-zen kernel\n- Limine bootloader\n- Btrfs filesystem\n- Optional encryption"
+run_install() {
+  # validate
+  missing=()
+  [[ -z "$DISK" ]]      && missing+=("disk")
+  [[ -z "$HOSTNAME" ]]  && missing+=("hostname")
+  [[ -z "$USERNAME" ]]  && missing+=("username")
+  [[ -z "$FULLNAME" ]]  && missing+=("full name")
+  [[ -z "$EMAIL" ]]     && missing+=("email")
+  [[ -z "$USERPASS" ]]  && missing+=("password")
+  [[ -z "$TIMEZONE" ]]  && missing+=("timezone")
+  [[ -z "$KEYMAP" ]]    && missing+=("keymap")
+  [[ -z "$ENCRYPT" ]]   && missing+=("encryption choice")
 
-show_main_menu
+  if (( ${#missing[@]} )); then
+    gum style --foreground 196 "Missing: ${missing[*]}"
+    pause
+    return
+  fi
+
+  clear
+  banner
+  summary
+  echo
+  gum confirm "Proceed with installation and ERASE $DISK ?" || return
+
+  loadkeys "$KEYMAP" 2>/dev/null || true
+
+  gum spin --title "Generating config..." -- generate_config
+  gum spin --title "Running archinstall..." -- archinstall --config /tmp/archinstall.json --creds /tmp/creds.json
+  gum spin --title "Post-install configuration..." -- post_install
+
+  clear
+  banner
+  gum style --foreground 46 "Installation complete. Reboot into your new system."
+}
+
+spin_fn() {
+  local title="$1"
+  local fn="$2"
+  export DISK HOSTNAME USERNAME FULLNAME EMAIL TIMEZONE KEYMAP ENCRYPT USERPASS
+  export -f "$fn"
+  gum spin --title "$title" -- bash -c "$fn"
+}
+
+
+view_archinstall_json() {
+  spin_fn "Generating config..." generate_config
+
+  [[ -s /tmp/archinstall.json ]] || {
+    gum style --foreground 196 "Missing /tmp/archinstall.json (generate_config didn't create it)."
+    pause
+    return 1
+  }
+
+  gum style --border normal --padding "0 1" "archinstall config: /tmp/archinstall.json"
+
+  if command -v jq >/dev/null 2>&1; then
+    jq . /tmp/archinstall.json > /tmp/archinstall.pretty.json
+    gum pager < /tmp/archinstall.pretty.json
+  else
+    gum pager < /tmp/archinstall.json
+  fi
+
+  pause
+}
+
+view_creds_json() {
+  spin_fn "Generating config..." generate_config
+
+  [[ -s /tmp/creds.json ]] || {
+    gum style --foreground 196 "Missing /tmp/creds.json (generate_config didn't create it)."
+    pause
+    return 1
+  }
+
+  if command -v jq >/dev/null 2>&1; then
+    jq . /tmp/creds.json | gum pager --header "creds: /tmp/creds.json"
+  else
+    gum pager --header "creds: /tmp/creds.json" < /tmp/creds.json
+  fi
+
+  pause
+}
+
+# -----------------------------
+# Main wizard
+# -----------------------------
+main_menu() {
+  while true; do
+    clear
+    banner
+    summary
+    echo
+
+choice=$(printf '%s\n' \
+  "Disk" "Hostname/User/Git" "Timezone" "Keyboard" "Encryption" "Password" \
+  "View archinstall JSON" "View creds JSON" \
+  "Install" "Quit" \
+| gum choose --header "Select an item to edit:")
+case "$choice" in
+  "Disk") pick_disk ;;
+  "Hostname/User/Git") enter_strings ;;
+  "Timezone") pick_timezone ;;
+  "Keyboard") pick_keymap ;;
+  "Encryption") pick_encryption ;;
+  "Password") enter_password ;;
+  "View archinstall JSON") view_archinstall_json ;;
+  "View creds JSON") view_creds_json ;;
+  "Install") run_install ;;
+  "Quit") exit 0 ;;
+esac
+  done
+}
+
+# -----------------------------
+# Entry
+# -----------------------------
+clear
+banner
+gum style "This wizard will install Arch Linux with:" \
+  "\n- linux-zen kernel" \
+  "\n- Limine bootloader" \
+  "\n- Btrfs (via archinstall default layout)" \
+  "\n- Optional LUKS encryption"
+pause
+
+main_menu
 
