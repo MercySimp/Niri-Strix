@@ -16,6 +16,9 @@ TIMEZONE=""
 KEYMAP=""
 ENCRYPT=""   # "Yes"/"No"
 USERPASS=""
+NIRI_STRIX_REPO="MercySimp/Niri-Strix"
+NIRI_STRIX_DIR="${HOME}/.local/share/niri-strix"
+PACKAGES_FILE="${NIRI_STRIX_DIR}/packages.x86_64"
 
 # -----------------------------
 # Helpers
@@ -156,45 +159,162 @@ enter_password() {
   done
 }
 
+test_packages() {
+  local packages_json
+  packages_json=$(read_packages_file)
+
+  gum style --border normal --padding "1 2" \
+    "PACKAGES_FILE: ${PACKAGES_FILE:-unset}
+
+Raw packages_json:
+[${packages_json}]"
+
+  pause
+}
+
 # -----------------------------
 # Config + install
 # -----------------------------
+
 generate_config() {
-  # Basic archinstall JSON (uses default layout, Linux-zen, Limine, no swap)
+  # Archinstall main config JSON
+  local packages_json
+  packages_json=$(read_packages_file)
+
   cat > /tmp/archinstall.json <<EOF
 {
-  "config_version": "3.1.5",
-  "hostname": "$HOSTNAME",
-  "timezone": "$TIMEZONE",
-  "keyboard-layout": "$KEYMAP",
-  "kernels": ["linux-zen"],
-  "bootloader": "limine",
-  "audio_config": { "audio": "pipewire" },
+  "app_config": {
+    "audio_config": { "audio": "pipewire" },
+    "bluetooth_config": { "enabled": true },
+    "power_management_config": { "power_management": "tuned" },
+    "print_service_config": { "enabled": true }
+  },
+  "archinstall-language": "English",
+  "auth_config": {},
+  "bootloader_config": {
+    "bootloader": "Limine",
+    "removable": true,
+    "uki": false
+  },
+  "custom_commands": [],
   "disk_config": {
+    "btrfs_options": {
+      "snapshot_config": {
+        "type": "Snapper"
+      }
+    },
     "config_type": "default_layout",
     "device_modifications": [
-      { "device": "$DISK", "wipe": true }
+      {
+        "device": "${DISK}",
+        "partitions": [
+          {
+            "btrfs": [],
+            "dev_path": null,
+            "flags": [
+              "boot",
+              "esp"
+            ],
+            "fs_type": "fat32",
+            "mount_options": [],
+            "mountpoint": "/boot",
+            "obj_id": null,
+            "size": {
+              "sector_size": { "unit": "B", "value": 512 },
+              "unit": "GiB",
+              "value": 1
+            },
+            "start": {
+              "sector_size": { "unit": "B", "value": 512 },
+              "unit": "MiB",
+              "value": 1
+            },
+            "status": "create",
+            "type": "primary"
+          },
+          {
+            "btrfs": [
+              { "mountpoint": "/", "name": "@" },
+              { "mountpoint": "/home", "name": "@home" },
+              { "mountpoint": "/var/log", "name": "@log" },
+              { "mountpoint": "/var/cache/pacman/pkg", "name": "@pkg" }
+            ],
+            "dev_path": null,
+            "flags": [],
+            "fs_type": "btrfs",
+            "mount_options": [ "compress=zstd" ],
+            "mountpoint": null,
+            "obj_id": null,
+            "size": {
+              "sector_size": { "unit": "B", "value": 512 },
+              "unit": "B",
+              "value": 1023133351936
+            },
+            "start": {
+              "sector_size": { "unit": "B", "value": 512 },
+              "unit": "B",
+              "value": 1074790400
+            },
+            "status": "create",
+            "type": "primary"
+          }
+        ],
+        "wipe": true
+      }
     ]
   },
-  "disk_encryption": $( [[ "$ENCRYPT" == "Yes" ]] && \
-    echo '{"encryption_type": "luks"}' || echo "null"),
-  "swap": false,
-  "nic": { "type": "nm" }
+  "hostname": "${HOSTNAME}",
+  "kernels": [
+    "linux-zen"
+  ],
+  "locale_config": {
+    "kb_layout": "${KEYMAP}",
+    "sys_enc": "UTF-8",
+    "sys_lang": "en_US.UTF-8"
+  },
+  "network_config": {
+    "type": "iso"
+  },
+  "ntp": true,
+  "plugin" : "https://raw.githubusercontent.com/Torxed/archinstall-aur/main/archinstall_aur/__init__.py",
+  "packages": [ ${packages_json} ],
+  "parallel_downloads": 0,
+  "profile_config": {
+    "gfx_driver": "All open-source",
+  },
+  "script": null,
+  "services": [],
+  "swap": {
+    "algorithm": "zstd",
+    "enabled": true
+  },
+  "timezone": "${TIMEZONE}",
+  "version": "3.0.15"
 }
 EOF
 
+  # Credentials JSON (root + one user)
   cat > /tmp/creds.json <<EOF
 {
-  "!users": [
-    {
-      "username": "$USERNAME",
-      "!password": "$USERPASS",
-      "sudo": true
+  "superusers": {
+    "root": {
+      "password": "${USERPASS}"
     }
-  ]
+  },
+  "users": {
+    "${USERNAME}": {
+      "password": "${USERPASS}",
+      "groups": [ "wheel" ],
+      "sudo": true,
+      "full_name": "${FULLNAME}",
+      "email": "${EMAIL}"
+    }
+  }
 }
 EOF
 }
+
+
 
 post_install() {
   # crude but works for your layout: root partition = second partition or cryptroot
@@ -212,6 +332,14 @@ su - "$USERNAME" -c "git config --global user.email \"$EMAIL\""
 echo "KEYMAP=$KEYMAP" > /etc/vconsole.conf
 CHROOT
   umount /mnt 2>/dev/null || true
+}
+
+ensure_repo() {
+  sudo pacman -Syu --noconfirm --needed git
+
+  echo -e "\nCloning Niri-Strix from: https://github.com/${NIRI_STRIX_REPO}.git"
+  rm -rf "${NIRI_STRIX_DIR}"
+  git clone "https://github.com/${NIRI_STRIX_REPO}.git" "${NIRI_STRIX_DIR}" >/dev/null
 }
 
 run_install() {
@@ -241,7 +369,7 @@ run_install() {
 
   loadkeys "$KEYMAP" 2>/dev/null || true
 
-  gum spin --title "Generating config..." -- generate_config
+  gum spin_fn --title "Generating config..." -- generate_config
   gum spin --title "Running archinstall..." -- archinstall --config /tmp/archinstall.json --creds /tmp/creds.json
   gum spin --title "Post-install configuration..." -- post_install
 
@@ -254,7 +382,9 @@ spin_fn() {
   local title="$1"
   local fn="$2"
   export DISK HOSTNAME USERNAME FULLNAME EMAIL TIMEZONE KEYMAP ENCRYPT USERPASS
+  export NIRI_STRIX_REPO NIRI_STRIX_DIR PACKAGES_FILE
   export -f "$fn"
+  export -f read_packages_file
   gum spin --title "$title" -- bash -c "$fn"
 }
 
@@ -298,10 +428,28 @@ view_creds_json() {
   pause
 }
 
+read_packages_file() {
+  local pkgs=()
+  if [[ -f "$PACKAGES_FILE" ]]; then
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue      # empty
+      [[ "$line" =~ ^# ]] && continue   # comment
+      pkgs+=("$line")
+    done < "$PACKAGES_FILE"
+  fi
+
+  local out=()
+  for p in "${pkgs[@]}"; do
+    out+=("\"$p\"")
+  done
+  printf '%s\n' "$(IFS=,; echo "${out[*]}")"
+}
+
 # -----------------------------
 # Main wizard
 # -----------------------------
 main_menu() {
+  ensure_repo
   while true; do
     clear
     banner
@@ -310,7 +458,7 @@ main_menu() {
 
 choice=$(printf '%s\n' \
   "Disk" "Hostname/User/Git" "Timezone" "Keyboard" "Encryption" "Password" \
-  "View archinstall JSON" "View creds JSON" \
+  "View archinstall JSON" "View creds JSON" "Test Packages"\
   "Install" "Quit" \
 | gum choose --header "Select an item to edit:")
 case "$choice" in
@@ -322,6 +470,7 @@ case "$choice" in
   "Password") enter_password ;;
   "View archinstall JSON") view_archinstall_json ;;
   "View creds JSON") view_creds_json ;;
+  "Test Packages") test_packages ;;
   "Install") run_install ;;
   "Quit") exit 0 ;;
 esac
