@@ -36,5 +36,4 @@ xorg-xwayland
 zram-generator
 obs-studio
 lutris
-steam
 retroarch
