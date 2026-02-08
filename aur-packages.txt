@@ -1,0 +1,8 @@
+limine-mkinitcpio-hook-git
+limine-snapper-sync-git
+localsend
+superfile-git
+tofi
+wl-screenrec-git
+xdg-terminal-exec-git
+zoxide-git

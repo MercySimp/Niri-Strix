@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Custom Arch Installer TUI using gum
 # Front-end for archinstall (linux-zen + Limine + Btrfs + optional LUKS)
 
@@ -16,9 +16,13 @@ TIMEZONE=""
 KEYMAP=""
 ENCRYPT=""   # "Yes"/"No"
 USERPASS=""
+ROOTPASS=""
 NIRI_STRIX_REPO="MercySimp/Niri-Strix"
+PARU_REPO="Morganamilo/Paru"
+PARU_DIR="${HOME}/.local/share/paru"
 NIRI_STRIX_DIR="${HOME}/.local/share/niri-strix"
-PACKAGES_FILE="${NIRI_STRIX_DIR}/packages.x86_64"
+PACKAGES_FILE="${NIRI_STRIX_DIR}/base-packages.txt"
+PACKAGES_AUR="${NIRI_STRIX_DIR}/aur-packages.txt"
 
 # -----------------------------
 # Helpers
@@ -157,6 +161,19 @@ enter_password() {
     [[ "$p1" == "$p2" ]] && { USERPASS="$p1"; break; }
     gum style --foreground 196 "Passwords do not match, try again."
   done
+
+    # Root password (optional)
+  if gum confirm "Set a root password? (recommended: No)" --default=false; then
+    while true; do
+      local r1 r2
+      r1=$(gum input --password --header "Enter root password")
+      r2=$(gum input --password --header "Confirm root password")
+      [[ "$r1" == "$r2" ]] && { ROOTPASS="$r1"; break; }
+      gum style --foreground 196 "Root passwords do not match, try again."
+    done
+  else
+    ROOTPASS=$USERPASS
+  fi
 }
 
 test_packages() {
@@ -171,6 +188,61 @@ Raw packages_json:
 
   pause
 }
+disk_bytes() {
+  lsblk -dbno SIZE "$1" | head -n1
+}
+
+sector_bytes() {
+  local base
+  base="$(basename "$1")"
+  cat "/sys/class/block/${base}/queue/logical_block_size"
+}
+
+align_down() { # align_down VALUE ALIGN
+  echo $(( ($1 / $2) * $2 ))
+}
+
+generate_partition_geometry() {
+  local disk="$1"
+
+  local mib=$((1024*1024))
+  local gib=$((1024*1024*1024))
+
+  local dbytes sbytes
+  dbytes="$(disk_bytes "$disk")"
+  sbytes="$(sector_bytes "$disk")"
+
+  local gpt_tail=$((34 * sbytes))
+
+  # ESP: 1MiB start, 1GiB size (matches your template)
+  local esp_start=$mib
+  local esp_size=$gib
+
+  # Root starts right after ESP
+  local root_start=$((esp_start + esp_size))
+
+  # root_size = align_down(disk_bytes - 34*sector_bytes, 1MiB) - root_start - 1MiB
+  local last_aligned
+  last_aligned="$(align_down $((dbytes - gpt_tail)) $mib)"
+
+  local root_size=$((last_aligned - root_start - mib))
+
+  # Basic sanity
+  if (( root_size <= 0 )); then
+    echo "0 0"
+    return 1
+  fi
+
+  echo "${root_start} ${root_size}"
+}
+
+new_uuid() {
+  if command -v uuidgen >/dev/null 2>&1; then
+    uuidgen
+  else
+    cat /proc/sys/kernel/random/uuid
+  fi
+}
 
 # -----------------------------
 # Config + install
@@ -180,6 +252,11 @@ generate_config() {
   # Archinstall main config JSON
   local packages_json
   packages_json=$(read_packages_file)
+  read -r ROOT_START ROOT_SIZE < <(generate_partition_geometry "$DISK")
+
+  local ESP_OBJ_ID ROOT_OBJ_ID
+  ESP_OBJ_ID="$(new_uuid)"
+  ROOT_OBJ_ID="$(new_uuid)"
 
   cat > /tmp/archinstall.json <<EOF
 {
@@ -218,7 +295,7 @@ generate_config() {
             "fs_type": "fat32",
             "mount_options": [],
             "mountpoint": "/boot",
-            "obj_id": null,
+            "obj_id": "${ESP_OBJ_ID}",
             "size": {
               "sector_size": { "unit": "B", "value": 512 },
               "unit": "GiB",
@@ -244,11 +321,11 @@ generate_config() {
             "fs_type": "btrfs",
             "mount_options": [ "compress=zstd" ],
             "mountpoint": null,
-            "obj_id": null,
+            "obj_id": "${ROOT_OBJ_ID}",
             "size": {
               "sector_size": { "unit": "B", "value": 512 },
               "unit": "B",
-              "value": 1023133351936
+              "value": ${ROOT_SIZE}
             },
             "start": {
               "sector_size": { "unit": "B", "value": 512 },
@@ -276,11 +353,16 @@ generate_config() {
     "type": "iso"
   },
   "ntp": true,
-  "plugin" : "https://raw.githubusercontent.com/Torxed/archinstall-aur/main/archinstall_aur/__init__.py",
   "packages": [ ${packages_json} ],
   "parallel_downloads": 0,
   "profile_config": {
     "gfx_driver": "All open-source",
+    "greeter": "sddm",
+    "profile": {
+    	"custom_settings": {},
+	"details": [],
+	"main": "Minimal"
+    }
   },
   "script": null,
   "services": [],
@@ -296,20 +378,15 @@ EOF
   # Credentials JSON (root + one user)
   cat > /tmp/creds.json <<EOF
 {
-  "superusers": {
-    "root": {
-      "password": "${USERPASS}"
-    }
-  },
-  "users": {
-    "${USERNAME}": {
-      "password": "${USERPASS}",
-      "groups": [ "wheel" ],
-      "sudo": true,
-      "full_name": "${FULLNAME}",
-      "email": "${EMAIL}"
-    }
-  }
+	"root_enc_password": "${ROOTPASS}"
+	"users": [
+	    {
+		"enc_password": "${USERPASS}",
+		"groups":[],
+		"sudo": true,
+		"username": "${USERNAME}"
+	    }
+	]
 }
 EOF
 }
@@ -317,6 +394,8 @@ EOF
 
 
 post_install() {
+	local aur_list_src ="${PACKAGES_AUR}"
+	local aur_list_dst ="/mnt/tmp/aur-packages.txt"
   # crude but works for your layout: root partition = second partition or cryptroot
   if [[ "$ENCRYPT" == "Yes" ]]; then
     ROOT_DEV="/dev/mapper/cryptroot"
@@ -327,9 +406,31 @@ post_install() {
 
   mount "$ROOT_DEV" /mnt 2>/dev/null || true
   arch-chroot /mnt /bin/bash <<CHROOT
-su - "$USERNAME" -c "git config --global user.name \"$FULLNAME\""
-su - "$USERNAME" -c "git config --global user.email \"$EMAIL\""
-echo "KEYMAP=$KEYMAP" > /etc/vconsole.conf
+  su - "$USERNAME" -c "git config --global user.name \"$FULLNAME\""
+  su - "$USERNAME" -c "git config --global user.email \"$EMAIL\""
+  echo "KEYMAP=$KEYMAP" > /etc/vconsole.conf
+
+  # Build+install paru as the user (NOT root)
+  su - "${USERNAME}" -c '
+  set -eEuo pipefail
+  cd /tmp
+  rm -rf paru
+  git clone https://aur.archlinux.org/paru.git
+  cd paru
+  makepkg -si --noconfirm
+  '
+
+  # Install AUR packages from list (skip blanks/comments)
+  if [[ -s /tmp/aur-packages.txt ]]; then
+    su - "${USERNAME}" -c '
+    set -eEuo pipefail
+    mapfile -t pkgs < <(grep -vE \"^\\s*(#|$)\" /tmp/aur-packages.txt)
+    if (( \${#pkgs[@]} )); then
+      paru -S --noconfirm --needed \"\${pkgs[@]}\"
+    fi
+  '
+  fi
+
 CHROOT
   umount /mnt 2>/dev/null || true
 }
@@ -340,6 +441,7 @@ ensure_repo() {
   echo -e "\nCloning Niri-Strix from: https://github.com/${NIRI_STRIX_REPO}.git"
   rm -rf "${NIRI_STRIX_DIR}"
   git clone "https://github.com/${NIRI_STRIX_REPO}.git" "${NIRI_STRIX_DIR}" >/dev/null
+  
 }
 
 run_install() {
@@ -369,7 +471,7 @@ run_install() {
 
   loadkeys "$KEYMAP" 2>/dev/null || true
 
-  gum spin_fn --title "Generating config..." -- generate_config
+  spin_fn "Generating config..." generate_config
   gum spin --title "Running archinstall..." -- archinstall --config /tmp/archinstall.json --creds /tmp/creds.json
   gum spin --title "Post-install configuration..." -- post_install
 
@@ -381,10 +483,13 @@ run_install() {
 spin_fn() {
   local title="$1"
   local fn="$2"
-  export DISK HOSTNAME USERNAME FULLNAME EMAIL TIMEZONE KEYMAP ENCRYPT USERPASS
+  export DISK HOSTNAME USERNAME FULLNAME EMAIL TIMEZONE KEYMAP ENCRYPT USERPASS ROOTPASS
   export NIRI_STRIX_REPO NIRI_STRIX_DIR PACKAGES_FILE
   export -f "$fn"
   export -f read_packages_file
+  export -f generate_partition_geometry
+  export -f disk_bytes sector_bytes align_down
+  export -f new_uuid
   gum spin --title "$title" -- bash -c "$fn"
 }
 
@@ -419,10 +524,13 @@ view_creds_json() {
     return 1
   }
 
+  gum style --border normal --padding "0 1" "archinstall config: /tmp/creds.json"
+
   if command -v jq >/dev/null 2>&1; then
-    jq . /tmp/creds.json | gum pager --header "creds: /tmp/creds.json"
+    jq . /tmp/creds.json > /tmp/creds.pretty.json
+    gum pager < /tmp/creds.pretty.json
   else
-    gum pager --header "creds: /tmp/creds.json" < /tmp/creds.json
+    gum pager < /tmp/creds.json
   fi
 
   pause
@@ -449,7 +557,8 @@ read_packages_file() {
 # Main wizard
 # -----------------------------
 main_menu() {
-  ensure_repo
+#  ensure_repo
+   local last_choice="Password"
   while true; do
     clear
     banner
@@ -458,9 +567,12 @@ main_menu() {
 
 choice=$(printf '%s\n' \
   "Disk" "Hostname/User/Git" "Timezone" "Keyboard" "Encryption" "Password" \
-  "View archinstall JSON" "View creds JSON" "Test Packages"\
+  "View archinstall JSON" "View creds JSON"\
   "Install" "Quit" \
-| gum choose --header "Select an item to edit:")
+| gum choose --header "Select an item to edit:" --selected "${last_choice}")
+
+  last_choice="$choice"
+
 case "$choice" in
   "Disk") pick_disk ;;
   "Hostname/User/Git") enter_strings ;;
@@ -470,7 +582,6 @@ case "$choice" in
   "Password") enter_password ;;
   "View archinstall JSON") view_archinstall_json ;;
   "View creds JSON") view_creds_json ;;
-  "Test Packages") test_packages ;;
   "Install") run_install ;;
   "Quit") exit 0 ;;
 esac
