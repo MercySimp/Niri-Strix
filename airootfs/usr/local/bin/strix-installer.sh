@@ -378,7 +378,7 @@ EOF
   # Credentials JSON (root + one user)
   cat > /tmp/creds.json <<EOF
 {
-	"root_enc_password": "${ROOTPASS}"
+	"root_enc_password": "${ROOTPASS}",
 	"users": [
 	    {
 		"enc_password": "${USERPASS}",
@@ -557,8 +557,8 @@ read_packages_file() {
 # Main wizard
 # -----------------------------
 main_menu() {
-#  ensure_repo
-   local last_choice="Password"
+   ensure_repo
+   local last_choice="Drive"
   while true; do
     clear
     banner

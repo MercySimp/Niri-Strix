@@ -24,12 +24,11 @@ swaybg
 swayidle
 swaylock
 thunar
-tofi
 vlc
 waybar
 wget
-wireless-tools
-wpa-supplicant
+wireless_tools
+wpa_supplicant
 xdg-utils
 xorg-server
 xorg-xinit
