@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Custom Arch Installer TUI using gum
 # Front-end for archinstall (linux-zen + Limine + Btrfs + optional LUKS)
 
@@ -392,48 +392,6 @@ EOF
 }
 
 
-
-post_install() {
-	local aur_list_src ="${PACKAGES_AUR}"
-	local aur_list_dst ="/mnt/tmp/aur-packages.txt"
-  # crude but works for your layout: root partition = second partition or cryptroot
-  if [[ "$ENCRYPT" == "Yes" ]]; then
-    ROOT_DEV="/dev/mapper/cryptroot"
-  else
-    ROOT_DEV="${DISK}p2"
-    [[ "$DISK" =~ ^/dev/sd ]] && ROOT_DEV="${DISK}2"
-  fi
-
-  mount "$ROOT_DEV" /mnt 2>/dev/null || true
-  arch-chroot /mnt /bin/bash <<CHROOT
-  su - "$USERNAME" -c "git config --global user.name \"$FULLNAME\""
-  su - "$USERNAME" -c "git config --global user.email \"$EMAIL\""
-  echo "KEYMAP=$KEYMAP" > /etc/vconsole.conf
-
-  # Build+install paru as the user (NOT root)
-  su - "${USERNAME}" -c '
-  set -eEuo pipefail
-  cd /tmp
-  rm -rf paru
-  git clone https://aur.archlinux.org/paru.git
-  cd paru
-  makepkg -si --noconfirm
-  '
-
-  # Install AUR packages from list (skip blanks/comments)
-  if [[ -s /tmp/aur-packages.txt ]]; then
-    su - "${USERNAME}" -c '
-    set -eEuo pipefail
-    mapfile -t pkgs < <(grep -vE \"^\\s*(#|$)\" /tmp/aur-packages.txt)
-    if (( \${#pkgs[@]} )); then
-      paru -S --noconfirm --needed \"\${pkgs[@]}\"
-    fi
-  '
-  fi
-
-CHROOT
-  umount /mnt 2>/dev/null || true
-}
 
 ensure_repo() {
   sudo pacman -Syu --noconfirm --needed git
