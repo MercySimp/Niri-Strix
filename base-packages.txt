@@ -38,3 +38,5 @@ obs-studio
 lutris
 retroarch
 inkscape
+gamescope
+xwayland-satellite

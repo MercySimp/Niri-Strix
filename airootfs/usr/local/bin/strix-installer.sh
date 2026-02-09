@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Custom Arch Installer TUI using gum
 # Front-end for archinstall (linux-zen + Limine + Btrfs + optional LUKS)
 
@@ -252,6 +252,8 @@ generate_config() {
   # Archinstall main config JSON
   local packages_json
   packages_json=$(read_packages_file)
+
+  local ROOT_START ROOT_SIZE
   read -r ROOT_START ROOT_SIZE < <(generate_partition_geometry "$DISK")
 
   local ESP_OBJ_ID ROOT_OBJ_ID
@@ -276,9 +278,7 @@ generate_config() {
   "custom_commands": [],
   "disk_config": {
     "btrfs_options": {
-      "snapshot_config": {
-        "type": "Snapper"
-      }
+      "snapshot_config": { "type": "Snapper" }
     },
     "config_type": "default_layout",
     "device_modifications": [
@@ -288,10 +288,7 @@ generate_config() {
           {
             "btrfs": [],
             "dev_path": null,
-            "flags": [
-              "boot",
-              "esp"
-            ],
+            "flags": ["boot", "esp"],
             "fs_type": "fat32",
             "mount_options": [],
             "mountpoint": "/boot",
@@ -319,7 +316,7 @@ generate_config() {
             "dev_path": null,
             "flags": [],
             "fs_type": "btrfs",
-            "mount_options": [ "compress=zstd" ],
+            "mount_options": ["compress=zstd"],
             "mountpoint": null,
             "obj_id": "${ROOT_OBJ_ID}",
             "size": {
@@ -341,17 +338,13 @@ generate_config() {
     ]
   },
   "hostname": "${HOSTNAME}",
-  "kernels": [
-    "linux-zen"
-  ],
+  "kernels": ["linux-zen"],
   "locale_config": {
     "kb_layout": "${KEYMAP}",
     "sys_enc": "UTF-8",
     "sys_lang": "en_US.UTF-8"
   },
-  "network_config": {
-    "type": "iso"
-  },
+  "network_config": { "type": "iso" },
   "ntp": true,
   "packages": [ ${packages_json} ],
   "parallel_downloads": 0,
@@ -359,17 +352,14 @@ generate_config() {
     "gfx_driver": "All open-source",
     "greeter": "sddm",
     "profile": {
-    	"custom_settings": {},
-	"details": [],
-	"main": "Minimal"
+      "custom_settings": {},
+      "details": [],
+      "main": "Minimal"
     }
   },
   "script": null,
   "services": [],
-  "swap": {
-    "algorithm": "zstd",
-    "enabled": true
-  },
+  "swap": { "algorithm": "zstd", "enabled": true },
   "timezone": "${TIMEZONE}",
   "version": "3.0.15"
 }
@@ -391,7 +381,137 @@ EOF
 EOF
 }
 
+post_install() {
+  # Where we log on the ISO
+  local LOGROOT="/tmp/strix-installer-logs"
+  local PLOG="${LOGROOT}/post_install.log"
+  mkdir -p "$LOGROOT"
 
+  # Tee *everything* from this function to the log
+  exec > >(tee -a "$PLOG") 2>&1
+
+  echo "=== post_install: START $(date -Is) ==="
+  echo "DISK=$DISK"
+  echo "ENCRYPT=$ENCRYPT"
+  echo "USERNAME=$USERNAME"
+  echo "NIRI_STRIX_DIR=$NIRI_STRIX_DIR"
+  echo "PACKAGES_FILE=$PACKAGES_FILE"
+  echo "PACKAGES_AUR=$PACKAGES_AUR"
+  AUR_FILES="$(grep -vE '^[[:space:]]*(#|$)' "$PACKAGES_AUR" 2>/dev/null || true)"
+  echo "AUR_FILES=$AUR_FILES"
+  echo
+
+  # --- Determine root device robustly ---
+  local ROOT_DEV=""
+  if [[ "${ENCRYPT,,}" == "yes" ]]; then
+    ROOT_DEV="/dev/mapper/cryptroot"
+  else
+    # Pick 2nd partition of DISK (ESP is #1, root is #2 in your layout)
+    mapfile -t parts < <(lsblk -pnro NAME "$DISK" | tail -n +2)
+    if (( ${#parts[@]} < 2 )); then
+      echo "ERROR: Expected 2+ partitions on $DISK, got: ${#parts[@]}"
+      lsblk -p "$DISK" || true
+      return 1
+    fi
+    ROOT_DEV="${parts[1]}"
+  fi
+  echo "ROOT_DEV=$ROOT_DEV"
+  echo
+
+  # --- Mount target system ---
+  mkdir -p /mnt
+  umount -R /mnt 2>/dev/null || true
+
+  echo "Mounting $ROOT_DEV -> /mnt"
+  mount -o subvol=@ "$ROOT_DEV" /mnt
+  mount -o subvol=@home "$ROOT_DEV" /mnt/home
+  mkdir -p /mnt/tmp /mnt/var/log/strix
+
+  # Marker proves we wrote to the installed system
+  echo "post_install started at $(date -Is)" > /mnt/var/log/strix/post_install.marker
+
+  # --- Copy config/package lists onto the installed system ---
+  if [[ -f "$PACKAGES_FILE" ]]; then
+    echo "Copying base package list -> /mnt/var/log/strix/base-packages.txt"
+    cp -f "$PACKAGES_FILE" /mnt/var/log/strix/base-packages.txt
+  else
+    echo "WARNING: base package list not found at $PACKAGES_FILE"
+  fi
+
+  if [[ -f "$PACKAGES_AUR" ]]; then
+    echo "Copying AUR package list -> /mnt/tmp/aur-packages.txt"
+    cp -f "$PACKAGES_AUR" /mnt/var/log/strix/aur-packages.txt
+    echo "AUR list lines: $(wc -l < /mnt/var/log/strix/aur-packages.txt || true)"
+  else
+    echo "WARNING: AUR package list not found at $PACKAGES_AUR"
+  fi
+
+  # --- Run everything in chroot, with its own log on the installed system ---
+  echo "Entering chroot..."
+  arch-chroot /mnt /bin/bash << 'CHROOT' | tee -a /mnt/var/log/strix/post_install.chroot.log
+  set -x
+
+echo "chroot: started at $(date -Is)" >> /var/log/strix/post_install.marker
+
+# Basics for building AUR packages
+pacman -Sy --noconfirm --needed base-devel git sudo
+
+# If the user doesn't exist for some reason, bail clearly
+id -u "$USERNAME" >/dev/null 2>&1 || { echo "ERROR: user $USERNAME does not exist"; exit 1; }
+
+# Persist keymap
+echo "KEYMAP=$KEYMAP" > /etc/vconsole.conf
+
+# Git identity
+su - "$USERNAME" -c "git config --global user.name  \"$FULLNAME\""
+su - "$USERNAME" -c "git config --global user.email \"$EMAIL\""
+
+# Temporarily allow passwordless sudo (so paru can install deps/pkgs non-interactively)
+cat > /etc/sudoers.d/99-"$USERNAME"-nopasswd <<EOF
+$USERNAME ALL=(ALL) NOPASSWD: ALL
+EOF
+chmod 0440 /etc/sudoers.d/99-"$USERNAME"-nopasswd
+
+# Build/install paru (build as user, install as root)
+su - "$USERNAME" -c '
+  cd /tmp
+  rm -rf paru
+  git clone https://aur.archlinux.org/paru.git
+  cd paru
+  makepkg -s --noconfirm
+'
+pacman -U --noconfirm /tmp/paru/*.pkg.tar.*
+pacman -Rns --noconfirm rust || true
+
+# Install AUR packages (if list exists)
+su - "$USERNAME" -c '
+  if [[ -s /var/log/strix/aur-packages.txt ]]; then
+    mapfile -t aur_pkgs < <(grep -vE "^[[:space:]]*(#|$)" /var/log/strix/aur-packages.txt)
+     if (( ${#aur_pkgs[@]} )); then
+       paru -S --noconfirm --needed "${aur_pkgs[@]}"
+     fi
+  fi
+'
+# Remove the temporary sudoers drop-in
+rm -f /etc/sudoers.d/99-"$USERNAME"-nopasswd
+
+echo "chroot: finished at $(date -Is)" >> /var/log/strix/post_install.marker
+CHROOT
+
+  local chroot_rc=${PIPESTATUS[0]}
+  echo
+  echo "arch-chroot exit code: $chroot_rc"
+
+  # Save the ISO-side log onto the installed system too
+  cp -f "$PLOG" /mnt/var/log/strix/post_install.iso.log || true
+  echo "post_install completed at $(date -Is) rc=$chroot_rc" >> /mnt/var/log/strix/post_install.marker
+
+  echo "Unmounting /mnt"
+  umount -R /mnt || true
+
+  echo "=== post_install: END $(date -Is) rc=$chroot_rc ==="
+  return "$chroot_rc"
+}
 
 ensure_repo() {
   sudo pacman -Syu --noconfirm --needed git
@@ -403,35 +523,64 @@ ensure_repo() {
 }
 
 run_install() {
+  local LOGDIR="/tmp/strix-installer-logs"
+  mkdir -p "$LOGDIR"
+
   # validate
   missing=()
-  [[ -z "$DISK" ]]      && missing+=("disk")
-  [[ -z "$HOSTNAME" ]]  && missing+=("hostname")
-  [[ -z "$USERNAME" ]]  && missing+=("username")
-  [[ -z "$FULLNAME" ]]  && missing+=("full name")
-  [[ -z "$EMAIL" ]]     && missing+=("email")
-  [[ -z "$USERPASS" ]]  && missing+=("password")
-  [[ -z "$TIMEZONE" ]]  && missing+=("timezone")
-  [[ -z "$KEYMAP" ]]    && missing+=("keymap")
-  [[ -z "$ENCRYPT" ]]   && missing+=("encryption choice")
+  [[ -z "$DISK" ]]     && missing+=("disk")
+  [[ -z "$HOSTNAME" ]] && missing+=("hostname")
+  [[ -z "$USERNAME" ]] && missing+=("username")
+  [[ -z "$FULLNAME" ]] && missing+=("full name")
+  [[ -z "$EMAIL" ]]    && missing+=("email")
+  [[ -z "$USERPASS" ]] && missing+=("password")
+  [[ -z "$TIMEZONE" ]] && missing+=("timezone")
+  [[ -z "$KEYMAP" ]]   && missing+=("keymap")
+  [[ -z "$ENCRYPT" ]]  && missing+=("encryption choice")
 
   if (( ${#missing[@]} )); then
     gum style --foreground 196 "Missing: ${missing[*]}"
     pause
-    return
+    return 1
   fi
 
   clear
   banner
   summary
   echo
-  gum confirm "Proceed with installation and ERASE $DISK ?" || return
 
+  gum confirm "Proceed with installation and ERASE $DISK ?" || return 0
   loadkeys "$KEYMAP" 2>/dev/null || true
 
-  spin_fn "Generating config..." generate_config
-  gum spin --title "Running archinstall..." -- archinstall --config /tmp/archinstall.json --creds /tmp/creds.json
-  gum spin --title "Post-install configuration..." -- post_install
+  # Generate config (and STOP CLEANLY if it fails)
+  if ! spin_fn "Generating config..." generate_config; then
+    gum style --foreground 196 "generate_config failed. View /tmp/archinstall.json and /tmp/creds.json."
+    [[ -e /tmp/archinstall.json ]] && gum pager < /tmp/archinstall.json || true
+    pause
+    return 1
+  fi
+
+  [[ -s /tmp/archinstall.json ]] || { gum style --foreground 196 "Missing /tmp/archinstall.json"; pause; return 1; }
+  [[ -s /tmp/creds.json ]]       || { gum style --foreground 196 "Missing /tmp/creds.json"; pause; return 1; }
+
+  # Run archinstall with a real log + captured exit code
+  sudo archinstall --silent --config /tmp/archinstall.json --creds /tmp/creds.json 2>&1 | tee "$LOGDIR/archinstall.log"
+  local arc_rc=${PIPESTATUS[0]}
+  if (( arc_rc != 0 )); then
+    gum style --foreground 196 "archinstall failed (rc=$arc_rc)."
+    gum pager < "$LOGDIR/archinstall.log"
+    pause
+    return "$arc_rc"
+  fi
+
+  gum confirm "View archinstall log?" --default=false && gum pager < "$LOGDIR/archinstall.log"
+
+  # Post install (and STOP CLEANLY if it fails)
+  if ! spin_fn "Post-install configuration..." post_install; then
+    gum style --foreground 196 "post_install failed. Check /mnt/var/log/strix/ logs (if mounted) or /tmp/strix-installer-logs."
+    pause
+    return 1
+  fi
 
   clear
   banner
@@ -441,8 +590,9 @@ run_install() {
 spin_fn() {
   local title="$1"
   local fn="$2"
+  local rc=0
   export DISK HOSTNAME USERNAME FULLNAME EMAIL TIMEZONE KEYMAP ENCRYPT USERPASS ROOTPASS
-  export NIRI_STRIX_REPO NIRI_STRIX_DIR PACKAGES_FILE
+  export NIRI_STRIX_REPO NIRI_STRIX_DIR PACKAGES_FILE PACKAGES_AUR
   export -f "$fn"
   export -f read_packages_file
   export -f generate_partition_geometry
@@ -451,12 +601,20 @@ spin_fn() {
   gum spin --title "$title" -- bash -c "$fn"
 }
 
-
 view_archinstall_json() {
-  spin_fn "Generating config..." generate_config
+  echo "Attempting to generate config..."
+  
+  if ! spin_fn "Generating config..." generate_config 2>&1 | tee /tmp/generate_debug.log; then
+    gum style --foreground 196 "Config generation failed. Debug output:"
+    cat /tmp/generate_debug.log
+    pause
+    return 1
+  fi
 
   [[ -s /tmp/archinstall.json ]] || {
     gum style --foreground 196 "Missing /tmp/archinstall.json (generate_config didn't create it)."
+    gum style --foreground 226 "Debug log:"
+    cat /tmp/generate_debug.log
     pause
     return 1
   }
@@ -472,6 +630,7 @@ view_archinstall_json() {
 
   pause
 }
+
 
 view_creds_json() {
   spin_fn "Generating config..." generate_config
@@ -515,8 +674,8 @@ read_packages_file() {
 # Main wizard
 # -----------------------------
 main_menu() {
-   ensure_repo
-   local last_choice="Drive"
+  ensure_repo
+  local last_choice="Disk"
   while true; do
     clear
     banner
