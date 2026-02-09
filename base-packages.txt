@@ -40,3 +40,5 @@ retroarch
 inkscape
 gamescope
 xwayland-satellite
+dunst
+zsh

@@ -446,6 +446,32 @@ post_install() {
     echo "WARNING: AUR package list not found at $PACKAGES_AUR"
   fi
 
+    # --- Copy User Configs (Dotfiles) ---
+  echo "Copying config files to user $USERNAME..."
+
+  # Define source and destination
+  # Adjust SOURCE_CONFIGS to match where your git repo is currently located in the live session
+  local SOURCE_CONFIGS="$NIRI_STRIX_DIR/airootfs/etc/skel/.config"
+  local TARGET_HOME="/mnt/home/$USERNAME"
+  local TARGET_CONFIG="$TARGET_HOME/.config"
+
+  if [[ -d "$SOURCE_CONFIGS" ]]; then
+    # Create target .config directory (mkdir -p handles if it exists or not)
+    mkdir -p "$TARGET_CONFIG"
+
+    # Copy recursively (-r), verbose (-v), no-clobber (-n, optional if you want to overwrite remove -n)
+    # Using 'cp -rT' copies the *contents* of source to target, preventing .config/.config nesting
+    cp -rvT "$SOURCE_CONFIGS" "$TARGET_CONFIG"
+
+    # CRITICAL: Fix permissions
+    # Since we are copying as root, files will be owned by root. We must chown them to the user.
+    arch-chroot /mnt chown -R "$USERNAME:$USERNAME" "/home/$USERNAME/.config"
+    
+    echo "Config files copied and permissions fixed."
+  else
+    echo "WARNING: Config source not found at $SOURCE_CONFIGS"
+  fi
+
   # --- Run everything in chroot, with its own log on the installed system ---
   echo "Entering chroot..."
   arch-chroot /mnt /bin/bash << 'CHROOT' | tee -a /mnt/var/log/strix/post_install.chroot.log
