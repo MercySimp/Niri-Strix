@@ -11,3 +11,5 @@ Strix uses linux-zen as the kernel, limine as the bootloader, btrfs for file str
 The first step was replication, build an ISO, then to build an install script which I felt would be easiest by passing a json file to archinstall. So that is what is currently being worked on, passing a json to archinstall.
 
 This is still under heavily development and I only work on this when not doing my day job so hope to have a functioning version by end of the month but no clue.
+
+The installer script is at 95% as it will currently install the system and not throw any flags moving all the config files from this github to the final live install. The next step is fixing some issues, A.) Archinstall takes the password exactly as it is passed by the installer, which is plaintext making the user unable to log in. Got around by setting the password in chroot and then booting. Other issue was that the boot files weren't created for limine so couldn't boot, fixed by reinstalling linux-zen as chroot. Running more tests, to resolve this before setting as beta version for install.

@@ -158,7 +158,7 @@ enter_password() {
   while true; do
     p1=$(gum input --password --header "Enter password for $USERNAME")
     p2=$(gum input --password --header "Confirm password")
-    [[ "$p1" == "$p2" ]] && { USERPASS="$p1"; break; }
+    [[ "$p1" == "$p2" ]] && { USERPASS=$(printf '%s' "$p1"| mkpasswd -m yescrypt --stdin); break; }
     gum style --foreground 196 "Passwords do not match, try again."
   done
 
@@ -168,7 +168,7 @@ enter_password() {
       local r1 r2
       r1=$(gum input --password --header "Enter root password")
       r2=$(gum input --password --header "Confirm root password")
-      [[ "$r1" == "$r2" ]] && { ROOTPASS="$r1"; break; }
+      [[ "$r1" == "$r2" ]] && { ROOTPASS=$(printf '%s' "$r1"| mkpasswd -m yescrypt --stdin); break; }
       gum style --foreground 196 "Root passwords do not match, try again."
     done
   else
@@ -414,8 +414,10 @@ post_install() {
       return 1
     fi
     ROOT_DEV="${parts[1]}"
+    BOOT_DEV="${parts[0]}"
   fi
   echo "ROOT_DEV=$ROOT_DEV"
+  echo "BOOT_DEV=$BOOT_DEV"
   echo
 
   # --- Mount target system ---
@@ -425,6 +427,7 @@ post_install() {
   echo "Mounting $ROOT_DEV -> /mnt"
   mount -o subvol=@ "$ROOT_DEV" /mnt
   mount -o subvol=@home "$ROOT_DEV" /mnt/home
+  mount "$BOOT_DEV" /mnt/boot
   mkdir -p /mnt/tmp /mnt/var/log/strix
 
   # Marker proves we wrote to the installed system
@@ -481,6 +484,7 @@ echo "chroot: started at $(date -Is)" >> /var/log/strix/post_install.marker
 
 # Basics for building AUR packages
 pacman -Sy --noconfirm --needed base-devel git sudo
+pacman -S --noconfirm linux-zen
 
 # If the user doesn't exist for some reason, bail clearly
 id -u "$USERNAME" >/dev/null 2>&1 || { echo "ERROR: user $USERNAME does not exist"; exit 1; }
@@ -540,7 +544,7 @@ CHROOT
 }
 
 ensure_repo() {
-  sudo pacman -Syu --noconfirm --needed git
+  sudo pacman -Syu --noconfirm --needed git whois
 
   echo -e "\nCloning Niri-Strix from: https://github.com/${NIRI_STRIX_REPO}.git"
   rm -rf "${NIRI_STRIX_DIR}"
