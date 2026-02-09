@@ -37,3 +37,4 @@ zram-generator
 obs-studio
 lutris
 retroarch
+inkscape

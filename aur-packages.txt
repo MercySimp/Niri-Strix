@@ -5,4 +5,3 @@ wl-screenrec-git
 xdg-terminal-exec-git
 zoxide-git
 bitwarden-bin
-inkscape-git
