@@ -7,3 +7,4 @@ zoxide-git
 bitwarden-bin
 vesktop-bin
 jellyfin-desktop
+sddm-silent-theme
