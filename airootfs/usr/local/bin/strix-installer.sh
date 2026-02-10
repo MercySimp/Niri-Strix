@@ -504,9 +504,20 @@ post_install() {
 
 echo "chroot: started at $(date -Is)" >> /var/log/strix/post_install.marker
 
+  pacman-key --recv-keys F3B607488DB35A47 --keyserver keyserver.ubuntu.com
+  pacman-key --lsign-key F3B607488DB35A47
+
+    cat >> /etc/pacman.conf <<REPO
+[cachyos]
+Server = https://mirror.cachyos.org/repo/x86_64/cachyos
+REPO
+
 # Basics for building AUR packages
-pacman -Sy --noconfirm --needed base-devel git sudo
+pacman -Sy --noconfirm --needed base-devel git sudo limine-snapper-sync limine-mkinitcpio-hook
 pacman -S --noconfirm linux-zen
+
+sed -i '/\[cachyos\]/,+2d' /etc/pacman.conf
+pacman -Sy
 
 # If the user doesn't exist for some reason, bail clearly
 id -u "$USERNAME" >/dev/null 2>&1 || { echo "ERROR: user $USERNAME does not exist"; exit 1; }
