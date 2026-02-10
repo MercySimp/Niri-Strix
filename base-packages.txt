@@ -5,6 +5,9 @@ btrfs-progs
 eza
 firefox
 fish
+foot
+starship
+fastfetch
 fuzzel
 git
 gum
@@ -22,6 +25,7 @@ smartmontools
 snapper
 swaybg
 swayidle
+steam
 swaylock
 thunar
 vlc
@@ -41,7 +45,4 @@ inkscape
 gamescope
 xwayland-satellite
 dunst
-zsh
-zsh-autocomplete
-zsh-autosuggestions
 ttf-jetbrains-mono-nerd
