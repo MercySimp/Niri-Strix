@@ -12,7 +12,6 @@ lua
 iwd
 kitty
 limine
-linux-zen
 linux-zen-headers
 neovim
 niri
