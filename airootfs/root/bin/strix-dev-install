@@ -1,0 +1,161 @@
+#!/bin/bash
+
+if [[ -z "$1" ]]; then
+  echo "Usage: strix-dev-install <ruby|node|bun|go|laravel|symfony|php|python|elixir|phoenix|rust|java|ocaml|dotnet|clojure|docker>" >&2
+  exit 1
+fi
+
+install_php() {
+  sudo pacman -S php composer php-sqlite xdebug --noconfirm
+
+  # Install Path for Composer
+  if [[ ":$PATH:" != *":$HOME/.config/composer/vendor/bin:"* ]]; then
+    echo 'export PATH="$HOME/.config/composer/vendor/bin:$PATH"' >>"$HOME/.bashrc"
+    source "$HOME/.bashrc"
+    echo "Added Composer global bin directory to PATH."
+  else
+    echo "Composer global bin directory already in PATH."
+  fi
+
+  # Enable some extensions
+  local php_ini_path="/etc/php/php.ini"
+  local extensions_to_enable=(
+    "bcmath"
+    "intl"
+    "iconv"
+    "openssl"
+    "pdo_sqlite"
+    "pdo_mysql"
+  )
+
+  # Enable Xdebug
+  sudo sed -i \
+    -e 's/^;zend_extension=xdebug.so/zend_extension=xdebug.so/' \
+    -e 's/^;xdebug.mode=debug/xdebug.mode=debug/' \
+    /etc/php/conf.d/xdebug.ini
+
+  for ext in "${extensions_to_enable[@]}"; do
+    sudo sed -i "s/^;extension=${ext}/extension=${ext}/" "$php_ini_path"
+  done
+}
+
+install_node() {
+  echo -e "Installing Node.js...\n"
+  mise use --global node@lts
+}
+
+case "$1" in
+ruby)
+  echo -e "Installing Ruby on Rails...\n"
+  strix-add-pkg libyaml
+  mise use --global ruby@latest
+  mise settings add idiomatic_version_file_enable_tools ruby
+  echo "gem: --no-document" > ~/.gemrc
+  mise x ruby -- gem install rails --no-document
+  echo -e "\nYou can now run: rails new myproject"
+  ;;
+node)
+  install_node
+  ;;
+bun)
+  echo -e "Installing Bun...\n"
+  mise use -g bun@latest
+  ;;
+deno)
+  echo -e "Installing Deno...\n"
+  mise use -g deno@latest
+  ;;
+go)
+  echo -e "Installing Go...\n"
+  mise use --global go@latest
+  ;;
+php)
+  echo -e "Installing PHP...\n"
+  install_php
+  ;;
+laravel)
+  echo -e "Installing PHP and Laravel...\n"
+  install_php
+  install_node
+  composer global require laravel/installer
+  echo -e "\nYou can now run: laravel new myproject"
+  ;;
+symfony)
+  echo -e "Installing PHP and Symfony...\n"
+  install_php
+  strix-add-pkg symfony-cli
+  echo -e "\nYou can now run: symfony new --webapp myproject"
+  ;;
+python)
+  echo -e "Installing Python...\n"
+  mise use --global python@latest
+  echo -e "\nInstalling uv...\n"
+  curl -fsSL https://astral.sh/uv/install.sh | sh
+  ;;
+elixir)
+  echo -e "Installing Elixir...\n"
+  mise use --global erlang@latest
+  mise use --global elixir@latest
+  mise x elixir -- mix local.hex --force
+  ;;
+phoenix)
+  echo -e "Installing Phoenix Framework...\n"
+  # Ensure Erlang/Elixir first
+  mise use --global erlang@latest
+  mise use --global elixir@latest
+  # Hex & Rebar
+  mise x elixir -- mix local.hex --force
+  mise x elixir -- mix local.rebar --force
+  # Phoenix project (phx_new)
+  mise x elixir -- mix archive.install hex phx_new --force
+  echo -e "\nYou can now run: mix phx.new my_app"
+  ;;
+rust)
+  echo -e "Installing Rust...\n"
+  bash -c "$(curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs)" -- -y
+  ;;
+java)
+  echo -e "Installing Java...\n"
+  mise use --global java@latest
+  ;;
+zig)
+  echo -e "Installing Zig...\n"
+  mise use --global zig@latest
+  mise use -g zls@latest
+  ;;
+ocaml)
+  echo -e "Installing OCaml...\n"
+  bash -c "$(curl -fsSL https://raw.githubusercontent.com/ocaml/opam/master/shell/install.sh)"
+  opam init --yes
+  eval "$(opam env)"
+  opam install ocaml-lsp-server odoc ocamlformat utop --yes
+  ;;
+dotnet)
+  echo -e "Installing .NET...\n"
+  mise use --global dotnet@latest
+  ;;
+clojure)
+  echo -e "Installing Clojure...\n"
+  strix-add-pkg rlwrap
+  mise use --global clojure@latest
+  ;;
+docker)
+options=("MySQL" "PostgreSQL" "Redis" "MongoDB" "MariaDB" "MSSQL")
+choices=$(printf "%s\n" "${options[@]}" | gum choose --header "Select database (return to install, esc to cancel)")
+
+if [[ -n "$choices" ]]; then
+  for db in $choices; do
+    case $db in
+    MySQL) sudo docker run -d --restart unless-stopped -p "127.0.0.1:3306:3306" --name=mysql8 -e MYSQL_ROOT_PASSWORD= -e MYSQL_ALLOW_EMPTY_PASSWORD=true mysql:8.4 ;;
+    PostgreSQL) sudo docker run -d --restart unless-stopped -p "127.0.0.1:5432:5432" --name=postgres17 -e POSTGRES_HOST_AUTH_METHOD=trust postgres:17 ;;
+    MariaDB) sudo docker run -d --restart unless-stopped -p "127.0.0.1:3306:3306" --name=mariadb11 -e MARIADB_ROOT_PASSWORD= -e MARIADB_ALLOW_EMPTY_ROOT_PASSWORD=true mariadb:11.8 ;;
+    Redis) sudo docker run -d --restart unless-stopped -p "127.0.0.1:6379:6379" --name=redis redis:7 ;;
+    MongoDB) sudo docker run -d --restart unless-stopped -p "127.0.0.1:27017:27017" --name mongodb -e MONGO_INITDB_ROOT_USERNAME=admin -e MONGO_INITDB_ROOT_PASSWORD=admin123 mongo:noble ;;
+    MSSQL) sudo docker run -d --restart unless-stopped -p "127.0.0.1:1433:1433" --name mssql -e MSSQL_PID=Developer -e ACCEPT_EULA=Y -e "MSSQL_SA_PASSWORD=@dmin123" mcr.microsoft.com/mssql/server:2022-CU12-ubuntu-22.04 ;;
+    esac
+  done
+else
+  echo "No databases selected for installation."
+fi
+;;
+esac

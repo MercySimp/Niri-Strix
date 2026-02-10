@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Arch Linux snapshot + update script
+# Requires: timeshift (sudo pacman -S timeshift), yay
+# Save as ~/bin/update-snapshot.sh && chmod +x
+
+SNAPSHOT_DIR="$HOME/timeshift"  # Adjust to your Timeshift location
+LOG_FILE="$HOME/update-snapshot.log"
+
+log() { echo "[$(date)] $*" | tee -a "$LOG_FILE"; }
+
+# Pre-update snapshot
+snapshot_system() {
+    log "📸 Creating Timeshift snapshot..."
+    if sudo timeshift --create --comments "Pre-update $(date +%Y-%m-%d)" --scripted; then
+        log "✅ Snapshot created successfully"
+    else
+        log "❌ Snapshot failed - aborting update"
+        exit 1
+    fi
+}
+
+# Full system update (pacman + AUR)
+update_system() {
+    log "🔄 Updating pacman repositories..."
+    sudo pacman -Syu --noconfirm
+
+    log "🔄 Updating AUR packages with yay..."
+    yay -Syu --noconfirm
+
+    log "🧹 Cleaning package cache..."
+    sudo pacman -Sc --noconfirm
+    yay -Sc --noconfirm
+}
+
+# Post-update verification
+verify_update() {
+    log "🔍 Verifying system..."
+    if pacman -Qk | grep -q "broken"; then
+        log "⚠ Some packages have broken dependencies"
+    else
+        log "✅ No broken packages found"
+    fi
+}
+
+main() {
+    log "=== Starting snapshot + update ==="
+    snapshot_system
+    update_system
+    verify_update
+    log "=== Update complete ==="
+    notify-send "System Updated" "Snapshot created + full update complete" || true
+}
+
+main "$@"

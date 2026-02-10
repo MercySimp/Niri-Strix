@@ -474,6 +474,22 @@ post_install() {
   else
     echo "WARNING: Config source not found at $SOURCE_CONFIGS"
   fi
+  
+  local SOURCE_BIN="$NIRI_STRIX_DIR/airootfs/root/bin/"
+  local TARGET_BIN="/mnt/bin"
+
+  if [[ -d "$SOURCE_BIN" ]]; then
+    mkdir -p "$TARGET_BIN" 
+
+    # Copy recursively (-r), verbose (-v), no-clobber (-n, optional if you want to overwrite remove -n)
+    # Using 'cp -rT' copies the *contents* of source to target, preventing .config/.config nesting
+    cp -rvT "$SOURCE_BIN" "$TARGET_BIN"
+    
+    echo "Bin files copied."
+  else
+    echo "WARNING: Bin source not found at $SOURCE_BIN"
+  fi
+
 
   # --- Run everything in chroot, with its own log on the installed system ---
   echo "Entering chroot..."

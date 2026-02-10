@@ -1,0 +1,17 @@
+{
+    "plugins": {},
+    "customCspRules": {
+        "upload.wikimedia.org": [
+            "connect-src",
+            "img-src",
+            "style-src",
+            "font-src"
+        ],
+        "external-content.duckduckgo.com": [
+            "connect-src",
+            "img-src",
+            "style-src",
+            "font-src"
+        ]
+    }
+}

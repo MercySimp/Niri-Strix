@@ -1,0 +1,130 @@
+{
+	"include": [
+		"~/.config/waybar/modules.jsonc",
+		"~/.config/waybar/modules_custom.jsonc",
+		"~/.config/waybar/modules_workspaces.jsonc"
+	],
+	"layer": "top",
+	"exclusive": true,
+	"passthrough": false,
+	"position": "top",
+	"spacing": 3,
+	"fixed-center": true,
+	"margin-top": 6,
+	"margin-left": 8,
+	"margin-right": 8,
+	"reload_style_on_change": true,
+	"modules-left": [
+		"custom/menu",
+		"custom/separator#blank_1",
+		"custom/arch_news",
+		"custom/separator#blank_1",
+		"custom/notification",
+		"custom/separator#blank_1",
+		"group/tools"
+	],
+	"modules-center": [		
+		"custom/weather",
+		"custom/separator#blank_1",
+		"clock"],
+	"modules-right": [
+		"custom/separator#blank_1",
+		"custom/pacman2",
+		"custom/separator#blank_1",
+		"group/hardware",
+		"custom/separator#blank_1",
+		"group/volume-control",
+		"custom/mviz",
+		"custom/separator#blank_1",
+    	"group/stocks",
+		"custom/power"
+	],
+	"group/hardware": {
+		"orientation": "horizontal",
+		"drawer": {
+			"transition-duration": 300,
+			"transition-left-to-right": false
+		},
+		"modules": [
+			"cpu",
+			"temperature",
+			"memory",
+			"custom/gpu_aio",
+			"disk"
+		]
+	},
+	"group/volume-control":{
+		"orientation":"horizontal",
+		"drawer":{
+			"transition-duration":300,
+			"transition-left-to-right": false
+		},
+		"modules": [
+			"pulseaudio",
+			"pulseaudio/slider"
+		]
+	},
+	"group/stocks":{
+		"orientation":"horizontal",
+		"drawer":{
+			"transition-duration":300,
+			"transition-left-to-right": false
+		},
+		"modules": [
+			"custom/etf-ticker",
+			"custom/stock_ticker"
+		]
+	},
+	// "group/system_state":{
+	// 	// "orientation": "horizontal",
+	// 	// "drawer": {
+	// 	// 	"transition-duration": 300,
+	// 	// 	"transition-left-to-right": true
+	// 	// },
+	// 	"modules":[
+	// 		"custom/power",
+	// 		"custom/lock"
+	// 	]
+	// },
+	"group/tools": {
+		"orientation": "horizontal",
+		"drawer": {
+			"transition-duration": 300,
+			"transition-left-to-right": true
+		},
+		"modules": [
+			"custom/chatgpt",
+			"custom/separator#blank_1",
+			"custom/hyprpicker",
+			"custom/separator#blank_1",
+			"custom/gemini",
+			"custom/separator#blank_1",
+			"custom/updater",
+			"custom/separator#blank_1",
+			"custom/ytmusic"
+		]
+	},
+	"pulseaudio/slider": {
+	"min": 0,
+	"max": 100,
+	"orientation": "horizontal"
+},
+  "custom/stock_ticker": {
+    "exec": "~/.config/waybar/scripts/stock_ticker.py",
+    "restart-interval": 15,
+    "format": "{}",
+    "return-type": "json",
+    "tooltip": true,
+    "on-click": "~/.config/waybar/scripts/open_url.sh stock"
+},
+
+  "custom/etf-ticker": {
+    "exec": "~/.config/waybar/scripts/ETF_ticker.py",
+    "restart-interval": 45,
+    "format": "{}",
+    "return-type": "json",
+    "tooltip": true,
+    "on-click": "~/.config/waybar/scripts/open_url.sh etf"
+}
+
+}

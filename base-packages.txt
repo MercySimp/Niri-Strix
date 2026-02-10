@@ -8,6 +8,7 @@ fish
 fuzzel
 git
 gum
+lua
 iwd
 kitty
 limine
@@ -44,3 +45,4 @@ dunst
 zsh
 zsh-autocomplete
 zsh-autosuggestions
+ttf-jetbrains-mono-nerd
