@@ -475,8 +475,8 @@ post_install() {
     echo "WARNING: Config source not found at $SOURCE_CONFIGS"
   fi
   
-  local SOURCE_BIN="$NIRI_STRIX_DIR/airootfs/root/bin/"
-  local TARGET_BIN="/mnt/bin"
+  local SOURCE_BIN="$NIRI_STRIX_DIR/airootfs/root/bin"
+  local TARGET_BIN="/mnt/usr/bin"
 
   if [[ -d "$SOURCE_BIN" ]]; then
     mkdir -p "$TARGET_BIN" 
@@ -490,6 +490,12 @@ post_install() {
     echo "WARNING: Bin source not found at $SOURCE_BIN"
   fi
 
+  SOURCE_SDDM="$NIRI_STRIX_DIR/airoots/etc/sddm.conf"
+  TARGET_SDDM="/mnt/etc"
+
+  cp -vT "$SOURCE_SDDM" "$TARGET_SDDM"
+
+  echo "SDDM Copied to Target."
 
   # --- Run everything in chroot, with its own log on the installed system ---
   echo "Entering chroot..."
@@ -538,6 +544,7 @@ su - "$USERNAME" -c '
      fi
   fi
 '
+
 # Remove the temporary sudoers drop-in
 rm -f /etc/sudoers.d/99-"$USERNAME"-nopasswd
 
