@@ -14,12 +14,10 @@ include "animations.kdl"
 include "startups.kdl"
 include "input.kdl"
 include "outputs.kdl"
+include "./themes/current.kdl"
 
-
-// Settings that influence how windows are positioned and sized.
-// Find more information on the wiki:
-// https://github.com/YaLTeR/niri/wiki/Configuration:-Layout
 layout {
+
     // Set gaps around windows in logical pixels.
     gaps 10
     background-color "transparent"
@@ -31,44 +29,17 @@ layout {
         proportion 0.66667
     }
 
-    // If you leave the brackets empty, the windows themselves will decide their initial width.
-     default-column-width {proportion 0.5;}
-
-    // By default focus ring and border are rendered as a solid background rectangle
-    // behind windows. That is, they will show up through semitransparent windows.
-    // This is because windows using client-side decorations can have an arbitrary shape.
-    //
-    // If you don't like that, you should uncomment `prefer-no-csd` below.
-    // Niri will draw focus ring and border *around* windows that agree to omit their
-    // client-side decorations.
-    //
-    // Alternatively, you can override it with a window rule called
-    // `draw-border-with-background`.
-
-    // You can change how the focus ring looks.
+    default-column-width { proportion 0.5; }
+    
     focus-ring {
         off
     }
 
-    border {
-        width 2.2
-        active-color "#00a138ff"
-        inactive-color "#000b1e"
-        urgent-color "#3e91b1"
-    }
+    border {}
 
-    // Struts shrink the area occupied by windows, similarly to layer-shell panels.
-    // You can think of them as a kind of outer gaps. They are set in logical pixels.
-    // Left and right struts will cause the next window to the side to always be visible.
-    // Top and bottom struts will simply add outer gaps in addition to the area occupied by
-    // layer-shell panels and regular gaps.
-    struts {
-        // left 64
-        // right 64
-        // top 64
-        // bottom 64
-    }
 }
+
+
 
 // Uncomment this line to ask the clients to omit their client-side decorations if possible.
 // If the client will specifically ask for CSD, the request will be honored.

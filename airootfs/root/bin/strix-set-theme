@@ -1,0 +1,23 @@
+#!/bin/sh
+THEME_NAME="$1" # e.g. "light" or "dark"
+CONF_DIR="$HOME/.config"
+niri_dir="/$CONF_DIR/niri/themes"
+btop_dir="/$CONF_DIR/btop/themes"
+dunst_dir="/$CONF_DIR/dunst/themes"
+kitty_dir="/$CONF_DIR/kitty/themes"
+spf_dir="/$CONF_DIR/superfile/theme"
+waybar_dir="/$CONF_DIR/waybar"
+vesktop_dir="/$CONF_DIR/vesktop/themes"
+nvim_dir="/$CONF_DIR/nvim/themes"
+# Copy theme to current
+cp "$niri_dir/$THEME_NAME.kdl" "$niri_dir/current.kdl"
+cp "$btop_dir/$THEME_NAME.theme" "$btop_dir/current.theme"
+cp "$dunst_dir/$THEME_NAME" "$CONF_DIR/dunst/dunstrc"
+cp "$kitty_dir/$THEME_NAME.conf" "$kitty_dir/current.conf"
+cp "$spf_dir/$THEME_NAME.toml" "$spf_dir/current.toml"
+cp "$waybar_dir/themes/css/$THEME_NAME.css" "$waybar_dir/theme.css"
+#cp "$vesktop_dir/$THEME_NAME.theme.css" "$vesktop_dir/current.theme.css"
+cp "$nvim_dir/$THEME_NAME.lua" "$CONF_DIR/nvim/lua/plugins/colorscheme.lua"
+
+dunstctl reload
+killall -SIGUSR2 waybar
