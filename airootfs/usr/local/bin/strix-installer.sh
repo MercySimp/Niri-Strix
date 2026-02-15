@@ -14,7 +14,7 @@ FULLNAME=""
 EMAIL=""
 TIMEZONE=""
 KEYMAP=""
-ENCRYPT=""   # "Yes"/"No"
+ENCRYPT="" # "Yes"/"No"
 USERPASS=""
 ROOTPASS=""
 NIRI_STRIX_REPO="MercySimp/Niri-Strix"
@@ -31,7 +31,8 @@ pause() { gum confirm "Continue?" >/dev/null || exit 1; }
 
 banner() {
   gum style --border normal --margin "1 2" --padding "1 2" \
-    --border-foreground 212 "$(cat <<'EOF'
+    --border-foreground 212 "$(
+      cat <<'EOF'
    ▄████████     ███        ▄████████  ▄█  ▀████    ▐████▀ 
   ███    ███ ▀█████████▄   ███    ███ ███    ███▌   ████▀  
   ███    █▀     ▀███▀▀██   ███    ███ ███▌    ███  ▐███    
@@ -42,12 +43,12 @@ banner() {
  ▄████████▀     ▄████▀     ███    ███ █▀   ████       ███▄ 
                            ███    ███                      
 EOF
-)"
+    )"
 }
 
 summary() {
   gum style --margin "1 2" --padding "0 2" --border normal --border-foreground 240 \
-"Disk:       ${DISK:-<not set>}
+    "Disk:       ${DISK:-<not set>}
 Hostname:   ${HOSTNAME:-<not set>}
 Username:   ${USERNAME:-<not set>}
 Full name:  ${FULLNAME:-<not set>}
@@ -66,7 +67,10 @@ pick_disk() {
   # Always get full /dev paths (-p / --paths behavior) so later lsblk calls work
   mapfile -t disk_lines < <(lsblk -dpno NAME,SIZE,MODEL | grep -E '^/dev/(nvme|sd|vd)')
 
-  ((${#disk_lines[@]})) || { gum style --foreground 196 "No disks found."; return 1; }
+  ((${#disk_lines[@]})) || {
+    gum style --foreground 196 "No disks found."
+    return 1
+  }
 
   local choices=()
   for line in "${disk_lines[@]}"; do
@@ -79,9 +83,9 @@ pick_disk() {
     local os_hint="Empty"
     while read -r p fstype _; do
       case "$fstype" in
-        ntfs) os_hint="Windows" ;;
-        vfat) [[ "$os_hint" == "Empty" ]] && os_hint="EFI/Boot" ;;
-        ext4|ext3|btrfs|xfs|f2fs) [[ "$os_hint" != "Windows" ]] && os_hint="Linux" ;;
+      ntfs) os_hint="Windows" ;;
+      vfat) [[ "$os_hint" == "Empty" ]] && os_hint="EFI/Boot" ;;
+      ext4 | ext3 | btrfs | xfs | f2fs) [[ "$os_hint" != "Windows" ]] && os_hint="Linux" ;;
       esac
     done < <(lsblk -pnro NAME,FSTYPE "$disk" | tail -n +2)
 
@@ -100,7 +104,10 @@ pick_disk() {
   detail=$(lsblk -p -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,PARTTYPE "$DISK")
   gum style --border normal --padding "1 2" "$detail"
 
-  gum confirm "ERASE ALL DATA ON $DISK and continue?" --default=false || { DISK=""; return 1; }
+  gum confirm "ERASE ALL DATA ON $DISK and continue?" --default=false || {
+    DISK=""
+    return 1
+  }
 }
 
 pick_timezone() {
@@ -158,17 +165,23 @@ enter_password() {
   while true; do
     p1=$(gum input --password --header "Enter password for $USERNAME")
     p2=$(gum input --password --header "Confirm password")
-    [[ "$p1" == "$p2" ]] && { USERPASS=$(printf '%s' "$p1"| mkpasswd -m yescrypt --stdin); break; }
+    [[ "$p1" == "$p2" ]] && {
+      USERPASS=$(printf '%s' "$p1" | mkpasswd -m yescrypt --stdin)
+      break
+    }
     gum style --foreground 196 "Passwords do not match, try again."
   done
 
-    # Root password (optional)
+  # Root password (optional)
   if gum confirm "Set a root password? (recommended: No)" --default=false; then
     while true; do
       local r1 r2
       r1=$(gum input --password --header "Enter root password")
       r2=$(gum input --password --header "Confirm root password")
-      [[ "$r1" == "$r2" ]] && { ROOTPASS=$(printf '%s' "$r1"| mkpasswd -m yescrypt --stdin); break; }
+      [[ "$r1" == "$r2" ]] && {
+        ROOTPASS=$(printf '%s' "$r1" | mkpasswd -m yescrypt --stdin)
+        break
+      }
       gum style --foreground 196 "Root passwords do not match, try again."
     done
   else
@@ -199,14 +212,14 @@ sector_bytes() {
 }
 
 align_down() { # align_down VALUE ALIGN
-  echo $(( ($1 / $2) * $2 ))
+  echo $((($1 / $2) * $2))
 }
 
 generate_partition_geometry() {
   local disk="$1"
 
-  local mib=$((1024*1024))
-  local gib=$((1024*1024*1024))
+  local mib=$((1024 * 1024))
+  local gib=$((1024 * 1024 * 1024))
 
   local dbytes sbytes
   dbytes="$(disk_bytes "$disk")"
@@ -228,7 +241,7 @@ generate_partition_geometry() {
   local root_size=$((last_aligned - root_start - mib))
 
   # Basic sanity
-  if (( root_size <= 0 )); then
+  if ((root_size <= 0)); then
     echo "0 0"
     return 1
   fi
@@ -260,7 +273,7 @@ generate_config() {
   ESP_OBJ_ID="$(new_uuid)"
   ROOT_OBJ_ID="$(new_uuid)"
 
-  cat > /tmp/archinstall.json <<EOF
+  cat >/tmp/archinstall.json <<EOF
 {
   "app_config": {
     "audio_config": { "audio": "pipewire" },
@@ -366,7 +379,7 @@ generate_config() {
 EOF
 
   # Credentials JSON (root + one user)
-  cat > /tmp/creds.json <<EOF
+  cat >/tmp/creds.json <<EOF
 {
 	"root_enc_password": "${ROOTPASS}",
 	"users": [
@@ -408,7 +421,7 @@ post_install() {
   else
     # Pick 2nd partition of DISK (ESP is #1, root is #2 in your layout)
     mapfile -t parts < <(lsblk -pnro NAME "$DISK" | tail -n +2)
-    if (( ${#parts[@]} < 2 )); then
+    if ((${#parts[@]} < 2)); then
       echo "ERROR: Expected 2+ partitions on $DISK, got: ${#parts[@]}"
       lsblk -p "$DISK" || true
       return 1
@@ -431,7 +444,7 @@ post_install() {
   mkdir -p /mnt/tmp /mnt/var/log/strix
 
   # Marker proves we wrote to the installed system
-  echo "post_install started at $(date -Is)" > /mnt/var/log/strix/post_install.marker
+  echo "post_install started at $(date -Is)" >/mnt/var/log/strix/post_install.marker
 
   # --- Copy config/package lists onto the installed system ---
   if [[ -f "$PACKAGES_FILE" ]]; then
@@ -444,12 +457,12 @@ post_install() {
   if [[ -f "$PACKAGES_AUR" ]]; then
     echo "Copying AUR package list -> /mnt/tmp/aur-packages.txt"
     cp -f "$PACKAGES_AUR" /mnt/var/log/strix/aur-packages.txt
-    echo "AUR list lines: $(wc -l < /mnt/var/log/strix/aur-packages.txt || true)"
+    echo "AUR list lines: $(wc -l </mnt/var/log/strix/aur-packages.txt || true)"
   else
     echo "WARNING: AUR package list not found at $PACKAGES_AUR"
   fi
 
-    # --- Copy User Configs (Dotfiles) ---
+  # --- Copy User Configs (Dotfiles) ---
   echo "Copying config files to user $USERNAME..."
 
   # Define source and destination
@@ -469,22 +482,22 @@ post_install() {
     # CRITICAL: Fix permissions
     # Since we are copying as root, files will be owned by root. We must chown them to the user.
     arch-chroot /mnt chown -R "$USERNAME:$USERNAME" "/home/$USERNAME/.config"
-    
+
     echo "Config files copied and permissions fixed."
   else
     echo "WARNING: Config source not found at $SOURCE_CONFIGS"
   fi
-  
+
   local SOURCE_BIN="$NIRI_STRIX_DIR/airootfs/root/bin"
   local TARGET_BIN="/mnt/usr/bin"
 
   if [[ -d "$SOURCE_BIN" ]]; then
-    mkdir -p "$TARGET_BIN" 
+    mkdir -p "$TARGET_BIN"
 
     # Copy recursively (-r), verbose (-v), no-clobber (-n, optional if you want to overwrite remove -n)
     # Using 'cp -rT' copies the *contents* of source to target, preventing .config/.config nesting
     cp -rvT "$SOURCE_BIN" "$TARGET_BIN"
-    
+
     echo "Bin files copied."
   else
     echo "WARNING: Bin source not found at $SOURCE_BIN"
@@ -499,7 +512,7 @@ post_install() {
 
   # --- Run everything in chroot, with its own log on the installed system ---
   echo "Entering chroot..."
-  arch-chroot /mnt /bin/bash << 'CHROOT' | tee -a /mnt/var/log/strix/post_install.chroot.log
+  arch-chroot /mnt /bin/bash <<'CHROOT' | tee -a /mnt/var/log/strix/post_install.chroot.log
   set -x
 
 echo "chroot: started at $(date -Is)" >> /var/log/strix/post_install.marker
@@ -555,7 +568,9 @@ su - "$USERNAME" -c '
      fi
   fi
 '
-
+pip install yfinance --break-system-packages
+pip install feedparser --break-system-packages
+pip install PyQt6 --break-system-packages
 # Remove the temporary sudoers drop-in
 rm -f /etc/sudoers.d/99-"$USERNAME"-nopasswd
 
@@ -568,7 +583,7 @@ CHROOT
 
   # Save the ISO-side log onto the installed system too
   cp -f "$PLOG" /mnt/var/log/strix/post_install.iso.log || true
-  echo "post_install completed at $(date -Is) rc=$chroot_rc" >> /mnt/var/log/strix/post_install.marker
+  echo "post_install completed at $(date -Is) rc=$chroot_rc" >>/mnt/var/log/strix/post_install.marker
 
   echo "Unmounting /mnt"
   umount -R /mnt || true
@@ -583,7 +598,7 @@ ensure_repo() {
   echo -e "\nCloning Niri-Strix from: https://github.com/${NIRI_STRIX_REPO}.git"
   rm -rf "${NIRI_STRIX_DIR}"
   git clone "https://github.com/${NIRI_STRIX_REPO}.git" "${NIRI_STRIX_DIR}" >/dev/null
-  
+
 }
 
 run_install() {
@@ -592,17 +607,17 @@ run_install() {
 
   # validate
   missing=()
-  [[ -z "$DISK" ]]     && missing+=("disk")
+  [[ -z "$DISK" ]] && missing+=("disk")
   [[ -z "$HOSTNAME" ]] && missing+=("hostname")
   [[ -z "$USERNAME" ]] && missing+=("username")
   [[ -z "$FULLNAME" ]] && missing+=("full name")
-  [[ -z "$EMAIL" ]]    && missing+=("email")
+  [[ -z "$EMAIL" ]] && missing+=("email")
   [[ -z "$USERPASS" ]] && missing+=("password")
   [[ -z "$TIMEZONE" ]] && missing+=("timezone")
-  [[ -z "$KEYMAP" ]]   && missing+=("keymap")
-  [[ -z "$ENCRYPT" ]]  && missing+=("encryption choice")
+  [[ -z "$KEYMAP" ]] && missing+=("keymap")
+  [[ -z "$ENCRYPT" ]] && missing+=("encryption choice")
 
-  if (( ${#missing[@]} )); then
+  if ((${#missing[@]})); then
     gum style --foreground 196 "Missing: ${missing[*]}"
     pause
     return 1
@@ -619,25 +634,33 @@ run_install() {
   # Generate config (and STOP CLEANLY if it fails)
   if ! spin_fn "Generating config..." generate_config; then
     gum style --foreground 196 "generate_config failed. View /tmp/archinstall.json and /tmp/creds.json."
-    [[ -e /tmp/archinstall.json ]] && gum pager < /tmp/archinstall.json || true
+    [[ -e /tmp/archinstall.json ]] && gum pager </tmp/archinstall.json || true
     pause
     return 1
   fi
 
-  [[ -s /tmp/archinstall.json ]] || { gum style --foreground 196 "Missing /tmp/archinstall.json"; pause; return 1; }
-  [[ -s /tmp/creds.json ]]       || { gum style --foreground 196 "Missing /tmp/creds.json"; pause; return 1; }
+  [[ -s /tmp/archinstall.json ]] || {
+    gum style --foreground 196 "Missing /tmp/archinstall.json"
+    pause
+    return 1
+  }
+  [[ -s /tmp/creds.json ]] || {
+    gum style --foreground 196 "Missing /tmp/creds.json"
+    pause
+    return 1
+  }
 
   # Run archinstall with a real log + captured exit code
   sudo archinstall --silent --config /tmp/archinstall.json --creds /tmp/creds.json 2>&1 | tee "$LOGDIR/archinstall.log"
   local arc_rc=${PIPESTATUS[0]}
-  if (( arc_rc != 0 )); then
+  if ((arc_rc != 0)); then
     gum style --foreground 196 "archinstall failed (rc=$arc_rc)."
-    gum pager < "$LOGDIR/archinstall.log"
+    gum pager <"$LOGDIR/archinstall.log"
     pause
     return "$arc_rc"
   fi
 
-  gum confirm "View archinstall log?" --default=false && gum pager < "$LOGDIR/archinstall.log"
+  gum confirm "View archinstall log?" --default=false && gum pager <"$LOGDIR/archinstall.log"
 
   # Post install (and STOP CLEANLY if it fails)
   if ! spin_fn "Post-install configuration..." post_install; then
@@ -667,7 +690,7 @@ spin_fn() {
 
 view_archinstall_json() {
   echo "Attempting to generate config..."
-  
+
   if ! spin_fn "Generating config..." generate_config 2>&1 | tee /tmp/generate_debug.log; then
     gum style --foreground 196 "Config generation failed. Debug output:"
     cat /tmp/generate_debug.log
@@ -686,15 +709,14 @@ view_archinstall_json() {
   gum style --border normal --padding "0 1" "archinstall config: /tmp/archinstall.json"
 
   if command -v jq >/dev/null 2>&1; then
-    jq . /tmp/archinstall.json > /tmp/archinstall.pretty.json
-    gum pager < /tmp/archinstall.pretty.json
+    jq . /tmp/archinstall.json >/tmp/archinstall.pretty.json
+    gum pager </tmp/archinstall.pretty.json
   else
-    gum pager < /tmp/archinstall.json
+    gum pager </tmp/archinstall.json
   fi
 
   pause
 }
-
 
 view_creds_json() {
   spin_fn "Generating config..." generate_config
@@ -708,10 +730,10 @@ view_creds_json() {
   gum style --border normal --padding "0 1" "archinstall config: /tmp/creds.json"
 
   if command -v jq >/dev/null 2>&1; then
-    jq . /tmp/creds.json > /tmp/creds.pretty.json
-    gum pager < /tmp/creds.pretty.json
+    jq . /tmp/creds.json >/tmp/creds.pretty.json
+    gum pager </tmp/creds.pretty.json
   else
-    gum pager < /tmp/creds.json
+    gum pager </tmp/creds.json
   fi
 
   pause
@@ -721,17 +743,20 @@ read_packages_file() {
   local pkgs=()
   if [[ -f "$PACKAGES_FILE" ]]; then
     while IFS= read -r line; do
-      [[ -z "$line" ]] && continue      # empty
-      [[ "$line" =~ ^# ]] && continue   # comment
+      [[ -z "$line" ]] && continue    # empty
+      [[ "$line" =~ ^# ]] && continue # comment
       pkgs+=("$line")
-    done < "$PACKAGES_FILE"
+    done <"$PACKAGES_FILE"
   fi
 
   local out=()
   for p in "${pkgs[@]}"; do
     out+=("\"$p\"")
   done
-  printf '%s\n' "$(IFS=,; echo "${out[*]}")"
+  printf '%s\n' "$(
+    IFS=,
+    echo "${out[*]}"
+  )"
 }
 
 # -----------------------------
@@ -746,26 +771,26 @@ main_menu() {
     summary
     echo
 
-choice=$(printf '%s\n' \
-  "Disk" "Hostname/User/Git" "Timezone" "Keyboard" "Encryption" "Password" \
-  "View archinstall JSON" "View creds JSON"\
-  "Install" "Quit" \
-| gum choose --header "Select an item to edit:" --selected "${last_choice}")
+    choice=$(printf '%s\n' \
+      "Disk" "Hostname/User/Git" "Timezone" "Keyboard" "Encryption" "Password" \
+      "View archinstall JSON" "View creds JSON" \
+      "Install" "Quit" |
+      gum choose --header "Select an item to edit:" --selected "${last_choice}")
 
-  last_choice="$choice"
+    last_choice="$choice"
 
-case "$choice" in
-  "Disk") pick_disk ;;
-  "Hostname/User/Git") enter_strings ;;
-  "Timezone") pick_timezone ;;
-  "Keyboard") pick_keymap ;;
-  "Encryption") pick_encryption ;;
-  "Password") enter_password ;;
-  "View archinstall JSON") view_archinstall_json ;;
-  "View creds JSON") view_creds_json ;;
-  "Install") run_install ;;
-  "Quit") exit 0 ;;
-esac
+    case "$choice" in
+    "Disk") pick_disk ;;
+    "Hostname/User/Git") enter_strings ;;
+    "Timezone") pick_timezone ;;
+    "Keyboard") pick_keymap ;;
+    "Encryption") pick_encryption ;;
+    "Password") enter_password ;;
+    "View archinstall JSON") view_archinstall_json ;;
+    "View creds JSON") view_creds_json ;;
+    "Install") run_install ;;
+    "Quit") exit 0 ;;
+    esac
   done
 }
 
@@ -782,4 +807,3 @@ gum style "This wizard will install Arch Linux with:" \
 pause
 
 main_menu
-
