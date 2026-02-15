@@ -1,0 +1,54 @@
+#-- Full Screen
+full_screen_fg = "#ffcead"   # main_fg
+full_screen_bg = "#060B1E"   # main_bg
+
+#-- Gradient
+# Note: This currently only supports two colors.
+gradient_color = ["#a3bfd1", "#7d82d9"]  # from cpu/temp ramps
+
+#-- File Panel
+file_panel_fg = "#ffcead"    # main_fg
+file_panel_bg = "#060B1E"    # main_bg
+file_panel_border = "#92a593"          # box outlines
+file_panel_border_active = "#a3bfd1"   # hi_fg
+file_panel_top_directory_icon = "#92a593"  # green from box colors
+file_panel_top_path = "#7d82d9"            # purple accent
+file_panel_item_selected_fg = "#ffcead"    # selected_fg
+file_panel_item_selected_bg = "#6d7db6"    # selected_bg
+
+#-- Footer
+footer_fg = "#ffcead"
+footer_bg = "#060B1E"
+footer_border = "#92a593"
+footer_border_active = "#a3bfd1"
+
+#-- Sidebar
+sidebar_fg = "#ffcead"
+sidebar_bg = "#060B1E"
+sidebar_title = "#c89dc1"        # title/proc_misc
+sidebar_border = "#060B1E"       # blend with bg
+sidebar_border_active = "#E9BB4F"  # yellow accent
+sidebar_item_selected_fg = "#ffcead"
+sidebar_item_selected_bg = "#6d7db6"
+sidebar_divider = "#6d7db6"
+
+#-- Modals
+modal_fg = "#ffcead"
+modal_bg = "#060B1E"
+modal_border_active = "#6d7db6"
+modal_cancel_fg = "#060B1E"
+modal_cancel_bg = "#c89dc1"
+modal_confirm_fg = "#060B1E"
+modal_confirm_bg = "#a3bfd1"
+
+#-- Help Menu
+help_menu_hotkey = "#a3bfd1"  # hi_fg
+help_menu_title = "#c89dc1"   # title
+
+#-- Special
+cursor = "#E9BB4F"
+correct = "#92a593"
+error = "#c89dc1"
+hint = "#a3bfd1"
+cancel = "#E9BB4F"
+

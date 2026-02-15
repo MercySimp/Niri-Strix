@@ -1,9 +1,9 @@
 return {
-  { "EdenEast/nightfox.nvim" },
+  { "rebelot/kanagawa.nvim" },
   {
     "LazyVim/LazyVim",
     opts = {
-      colorscheme = "nordfox",
+      colorscheme = "kanagawa-wave",
     },
   },
 }

@@ -1,7 +1,7 @@
-/* Gruvbox Rose Midnight */
+/* Nord */
 
-@define-color bg0_h           #000b1e;
-@define-color bg0             #0a1528;
+@define-color bg0_h           #2e3448;
+@define-color bg0             #0dddd1;
 @define-color bg1             #383450;
 @define-color bg2             #454063;
 @define-color bg3             #bdae93;
@@ -11,10 +11,10 @@
 @define-color fg3             #665c54;
 @define-color fg2             #504945;
 @define-color fg1             #3c3836;
-@define-color fg0             #0abdc6;
+@define-color fg0             #e5e9f0;
 @define-color red             #cc241d;
 @define-color bright_red      #9d0006;
-@define-color green           #00a138;
+@define-color green           #88c0d0;
 @define-color bright_green    #79740e;
 @define-color yellow          #d79921;
 @define-color bright_yellow   #b57614;

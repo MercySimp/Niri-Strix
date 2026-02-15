@@ -1,9 +1,13 @@
 return {
-  { "EdenEast/nightfox.nvim" },
+  {
+    "arcticicestudio/nord-vim",
+    lazy = false,
+    priority = 1000,
+  },
   {
     "LazyVim/LazyVim",
     opts = {
-      colorscheme = "nordfox",
+      colorscheme = "nord",
     },
   },
 }

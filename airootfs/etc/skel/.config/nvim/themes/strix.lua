@@ -1,9 +1,13 @@
 return {
-  { "EdenEast/nightfox.nvim" },
+  {
+    "pineapplegiant/spaceduck",
+    lazy = false,
+    priority = 1000,
+  },
   {
     "LazyVim/LazyVim",
     opts = {
-      colorscheme = "nordfox",
+      colorscheme = "spaceduck",
     },
   },
 }

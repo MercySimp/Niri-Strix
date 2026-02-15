@@ -15,9 +15,9 @@
 layout {
     border {
         width 2.2
-        active-color "#d8dee9"
-        inactive-color "#434c5e"
-        urgent-color "#bf616a"
+        active-color "#6d7db1"
+        inactive-color "#060b1e"
+        urgent-color "#a3bfd1"
     }
 
 }

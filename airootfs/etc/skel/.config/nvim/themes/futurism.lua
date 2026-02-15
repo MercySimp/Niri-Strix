@@ -1,9 +1,12 @@
 return {
-  { "EdenEast/nightfox.nvim" },
+  {
+    "folke/tokyonight.nvim",
+    name = "tokyonight",
+  },
   {
     "LazyVim/LazyVim",
     opts = {
-      colorscheme = "nordfox",
+      colorscheme = "tokyonight-storm",
     },
   },
 }

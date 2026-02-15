@@ -1,0 +1,54 @@
+#-- Full Screen
+full_screen_fg = "#F0F8FF"   # main_fg
+full_screen_bg = "#0A1428"   # main_bg
+
+#-- Gradient
+# Note: This currently only supports two colors.
+gradient_color = ["#6A90D2", "#00BFFF"]  # from *_start / *_end ramps
+
+#-- File Panel
+file_panel_fg = "#F0F8FF"    # main_fg
+file_panel_bg = "#0A1428"    # main_bg
+file_panel_border = "#6A90D2"          # box outlines
+file_panel_border_active = "#00BFFF"   # hi_fg
+file_panel_top_directory_icon = "#6A90D2"  # blue from ramps
+file_panel_top_path = "#FF40A3"            # pink accent
+file_panel_item_selected_fg = "#0A1428"    # selected_fg
+file_panel_item_selected_bg = "#FF40A3"    # selected_bg
+
+#-- Footer
+footer_fg = "#F0F8FF"
+footer_bg = "#0A1428"
+footer_border = "#6A90D2"
+footer_border_active = "#00BFFF"
+
+#-- Sidebar
+sidebar_fg = "#F0F8FF"
+sidebar_bg = "#0A1428"
+sidebar_title = "#00BFFF"        # hi_fg as accent
+sidebar_border = "#0A1428"       # blend with bg
+sidebar_border_active = "#FF40A3"  # pink accent
+sidebar_item_selected_fg = "#0A1428"
+sidebar_item_selected_bg = "#FF40A3"
+sidebar_divider = "#6A90D2"
+
+#-- Modals
+modal_fg = "#F0F8FF"
+modal_bg = "#0A1428"
+modal_border_active = "#6A90D2"
+modal_cancel_fg = "#0A1428"
+modal_cancel_bg = "#FF40A3"
+modal_confirm_fg = "#0A1428"
+modal_confirm_bg = "#00BFFF"
+
+#-- Help Menu
+help_menu_hotkey = "#00BFFF"  # hi_fg
+help_menu_title = "#FF40A3"   # pink accent
+
+#-- Special
+cursor = "#FF40A3"
+correct = "#00BFFF"
+error = "#FF40A3"
+hint = "#00BFFF"
+cancel = "#FF40A3"
+

@@ -1,5 +1,4 @@
-// This config is in the KDL format: https://kdl.dev
-// "/-" comments out the following node.
+// This config is in the KDL format: https://kdl.dev "/-" comments out the following node.
 // Check the wiki for a full description of the configuration:
 // https://github.com/YaLTeR/niri/wiki/Configuration:-Overview
 
@@ -15,9 +14,9 @@
 layout {
     border {
         width 2.2
-        active-color "#d8dee9"
-        inactive-color "#434c5e"
-        urgent-color "#bf616a"
+        active-color "#7287fd"
+        inactive-color "#4c4f69"
+        urgent-color "#eff1f5"
     }
 
 }
