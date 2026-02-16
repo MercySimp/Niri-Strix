@@ -15,6 +15,7 @@ lua
 iwd
 kitty
 limine
+linux-zen
 linux-zen-headers
 neovim
 niri
@@ -46,3 +47,5 @@ gamescope
 xwayland-satellite
 dunst
 ttf-jetbrains-mono-nerd
+python-pip
+python-pipx

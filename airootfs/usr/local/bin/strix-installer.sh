@@ -526,7 +526,7 @@ Server = https://mirror.cachyos.org/repo/x86_64/cachyos
 REPO
 
 # Basics for building AUR packages
-pacman -Sy --noconfirm --needed base-devel git sudo limine-snapper-sync limine-mkinitcpio-hook
+pacman -Sy --noconfirm --needed base-devel git sudo
 pacman -S --noconfirm linux-zen
 
 sed -i '/\[cachyos\]/,+2d' /etc/pacman.conf
