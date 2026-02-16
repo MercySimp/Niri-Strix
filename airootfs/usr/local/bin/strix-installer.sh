@@ -587,9 +587,6 @@ CHROOT
   cp -f "$PLOG" /mnt/var/log/strix/post_install.iso.log || true
   echo "post_install completed at $(date -Is) rc=$chroot_rc" >>/mnt/var/log/strix/post_install.marker
 
-  echo "Unmounting /mnt"
-  umount -R /mnt || true
-
   echo "=== post_install: END $(date -Is) rc=$chroot_rc ==="
   return "$chroot_rc"
 }
@@ -673,7 +670,34 @@ run_install() {
 
   clear
   banner
-  gum style --foreground 46 "Installation complete. Reboot into your new system."
+  gum style --foreground 46 "Arch Install completed. Beginning Post Install Process."
+
+  local action
+  action=$(gum choose "Reboot" "Chroot into new system" "Return to menu" --header "What would you like to do?")
+
+  case "$action" in
+  "Reboot")
+    umount -R /mnt 2>/dev/null || true
+    reboot
+    ;;
+  "Chroot into new system")
+    clear
+    echo "Entering chroot environment... (Type 'exit' to leave)"
+    arch-chroot /mnt
+
+    echo -e "\nLeft chroot."
+    if gum confirm "Reboot now?"; then
+      umount -R /mnt 2>/dev/null || true
+      reboot
+    else
+      umount -R /mnt 2>/dev/null || true
+    fi
+    ;;
+  "Return to menu")
+    umount -R /mnt 2>/dev/null || true
+    exit 0
+    ;;
+  esac
 }
 
 spin_fn() {
