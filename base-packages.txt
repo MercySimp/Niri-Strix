@@ -9,6 +9,7 @@ foot
 starship
 fastfetch
 fuzzel
+fzf
 git
 gum
 lua
@@ -26,6 +27,7 @@ smartmontools
 snapper
 swaybg
 swayidle
+swww
 steam
 swaylock
 thunar

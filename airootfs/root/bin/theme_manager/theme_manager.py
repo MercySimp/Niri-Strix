@@ -2,7 +2,7 @@ from pathlib import Path
 import json
 from typing import Dict, List, Any, Optional
 
-from config import THEME_MANAGER_DIR, THEMES_FILE, STATE_FILE, APP_CONFIGS, ACTIVE_CONFIGS
+from config import THEME_MANAGER_DIR, THEMES_FILE, STATE_FILE, APP_CONFIGS, ACTIVE_CONFIGS, WALLS_DIR
 from parsers.btop_parser import BtopParser
 from parsers.dunst_parser import DunstParser
 from parsers.kitty_parser import KittyParser
@@ -11,6 +11,7 @@ from parsers.nvim_parser import NvimParser
 from parsers.rofi_parser import RofiParser
 from parsers.superfile_parser import SuperfileParser
 from parsers.waybar_parser import WaybarParser
+from wallpaper_manager import WallpaperManager
 
 class ThemeManager:
     def __init__(self):
@@ -24,6 +25,7 @@ class ThemeManager:
             'rofi': RofiParser(),          
             'dunst': DunstParser(),        
         }
+        self.wallpaper_manager = WallpaperManager(WALLS_DIR)
         self.ensure_dirs()
 
     def ensure_dirs(self):
@@ -105,13 +107,15 @@ class ThemeManager:
                     f.write(content)
             except Exception as e:
                 print(f"Error generating {app} theme: {e}")
-
-    def apply_theme(self, name: str, apps: List[str]) -> bool:
+    
+    
+    def apply_theme(self, name: str, apps: List[str], apply_wallpaper: bool = False, transition: str = "fade") -> bool:
         theme = self.get_theme(name)
         if not theme:
             return False
 
         try:
+            # Apply colors to apps
             for app in apps:
                 if app not in self.parsers:
                     continue
@@ -123,12 +127,24 @@ class ThemeManager:
                     parser = self.parsers[app]
                     parser.apply(theme_file, ACTIVE_CONFIGS[app])
 
-            self.save_state({'current_theme': name, 'apps': apps})
+            # Apply wallpaper BEFORE return
+            if apply_wallpaper:
+                self.wallpaper_manager.set_random_wallpaper(name, transition)
+
+            # Save state with wallpaper info
+            self.save_state({
+                'current_theme': name, 
+                'apps': apps,
+                'wallpaper_enabled': apply_wallpaper,
+                'wallpaper_transition': transition
+            })
+        
             return True
         except Exception as e:
             print(f"Error applying theme: {e}")
             return False
 
+   
     def save_state(self, state: Dict[str, Any]):
         try:
             with open(STATE_FILE, 'w') as f:
@@ -148,6 +164,15 @@ class ThemeManager:
             'dunst': 'conf',
         }
         return extensions.get(app, 'conf')
+
+    def get_theme_wallpaper_info(self, theme_name: str) -> dict:
+        """Get wallpaper information for a theme"""
+        wallpapers = self.wallpaper_manager.get_theme_wallpapers(theme_name)
+        return {
+            'count': len(wallpapers),
+            'wallpapers': wallpapers,
+            'directory': self.wallpaper_manager.walls_dir / theme_name
+        }
 
     def import_from_existing(self, name: str, author: str = "Imported"):
         colors = {}

@@ -28,6 +28,7 @@ ACTIVE_CONFIGS = {
 THEME_MANAGER_DIR = CONF_DIR / "theme-manager"
 THEMES_FILE = THEME_MANAGER_DIR / "themes.json"
 STATE_FILE = THEME_MANAGER_DIR / "state.json"
+WALLS_DIR = CONF_DIR / "walls"
 
 THEME_MANAGER_DIR.mkdir(parents=True, exist_ok=True)
 for app_dir in APP_CONFIGS.values():

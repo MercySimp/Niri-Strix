@@ -503,7 +503,7 @@ post_install() {
     echo "WARNING: Bin source not found at $SOURCE_BIN"
   fi
 
-  SOURCE_SDDM="$NIRI_STRIX_DIR/airoots/etc/sddm.conf"
+  SOURCE_SDDM="$NIRI_STRIX_DIR/airootfs/etc/sddm.conf"
   TARGET_SDDM="/mnt/etc"
 
   cp -vT "$SOURCE_SDDM" "$TARGET_SDDM"
@@ -526,7 +526,9 @@ Server = https://mirror.cachyos.org/repo/x86_64/cachyos
 REPO
 
 # Basics for building AUR packages
-pacman -Sy --noconfirm --needed base-devel git sudo
+pacman -Sy --noconfirm --needed base-devel git sudo limine-mkinitcpio-hook limine-snapper-sync
+cp /boot/limine/limine.conf /boot/limine.conf
+rm -rf /boot/limine
 pacman -S --noconfirm linux-zen
 
 sed -i '/\[cachyos\]/,+2d' /etc/pacman.conf
@@ -568,9 +570,9 @@ su - "$USERNAME" -c '
      fi
   fi
 '
-pip install yfinance --break-system-packages
+pipx install yfinance --break-system-packages
 pip install feedparser --break-system-packages
-pip install PyQt6 --break-system-packages
+pipx install PyQt6 --break-system-packages
 # Remove the temporary sudoers drop-in
 rm -f /etc/sudoers.d/99-"$USERNAME"-nopasswd
 

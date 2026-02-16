@@ -2,9 +2,10 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QPushButton, QListWidget, QLabel, QMessageBox,
     QGroupBox, QCheckBox, QScrollArea, QGridLayout, QInputDialog,
-    QTabWidget
+    QTabWidget, QComboBox
 )
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPixmap
 
 from theme_manager import ThemeManager
 from gui.color_widget import ColorPreviewWidget
@@ -85,8 +86,41 @@ class ThemeManagerWindow(QMainWindow):
         self.lbl_theme_author = QLabel("")
         info_layout.addWidget(self.lbl_theme_author)
 
+         # ADD WALLPAPER INFO
+        self.lbl_wallpaper_count = QLabel("")
+        self.lbl_wallpaper_count.setStyleSheet("color: #14B9B5;")
+        info_layout.addWidget(self.lbl_wallpaper_count)
+
         info_group.setLayout(info_layout)
         layout.addWidget(info_group)
+
+            # ADD WALLPAPER PREVIEW SECTION
+        wallpaper_group = QGroupBox("Wallpaper Preview")
+        wallpaper_layout = QVBoxLayout()
+
+        self.wallpaper_preview = QLabel("No wallpaper")
+        self.wallpaper_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.wallpaper_preview.setMinimumHeight(150)
+        self.wallpaper_preview.setMaximumHeight(200)
+        self.wallpaper_preview.setStyleSheet("border: 1px solid #555; background: #1a1a1a;")
+        self.wallpaper_preview.setScaledContents(True)
+        wallpaper_layout.addWidget(self.wallpaper_preview)
+
+        # Wallpaper controls
+        wp_controls = QHBoxLayout()
+
+        self.btn_open_walls_dir = QPushButton("Open Wallpaper Folder")
+        self.btn_open_walls_dir.clicked.connect(self.open_wallpaper_directory)
+        wp_controls.addWidget(self.btn_open_walls_dir)
+
+        self.btn_refresh_wallpapers = QPushButton("Refresh")
+        self.btn_refresh_wallpapers.clicked.connect(self.refresh_wallpaper_preview)
+        wp_controls.addWidget(self.btn_refresh_wallpapers)
+
+        wallpaper_layout.addLayout(wp_controls)
+
+        wallpaper_group.setLayout(wallpaper_layout)
+        layout.addWidget(wallpaper_group)
 
         # Tabbed color preview
         preview_group = QGroupBox("Color Preview")
@@ -100,8 +134,10 @@ class ThemeManagerWindow(QMainWindow):
 
         # Application selection
         app_group = QGroupBox("Apply to Applications")
-        app_layout = QGridLayout()  # Use grid for better layout
+        app_layout = QVBoxLayout()  # Use grid for better layout
 
+        # App checkboxes in grid
+        app_grid = QGridLayout()
         self.app_checkboxes = {}
         apps = ["niri", "btop", "kitty", "nvim", "waybar", "superfile", "rofi", "dunst"]
 
@@ -109,13 +145,36 @@ class ThemeManagerWindow(QMainWindow):
             cb = QCheckBox(app_name.capitalize())
             cb.setChecked(True)
             self.app_checkboxes[app_name] = cb
-            # Arrange in 2 columns
-            app_layout.addWidget(cb, i // 2, i % 2)
+            app_grid.addWidget(cb, i // 2, i % 2)
+
+        app_layout.addLayout(app_grid)
+
+        # ADD WALLPAPER CHECKBOX AND TRANSITION
+        app_layout.addSpacing(10)
+
+        self.cb_apply_wallpaper = QCheckBox("Apply Wallpaper")
+        self.cb_apply_wallpaper.setChecked(True)
+        self.cb_apply_wallpaper.setStyleSheet("font-weight: bold; color: #14B9B5;")
+        app_layout.addWidget(self.cb_apply_wallpaper)
+
+        transition_layout = QHBoxLayout()
+        transition_layout.addWidget(QLabel("Transition:"))
+
+        self.transition_combo = QComboBox()
+        self.transition_combo.addItems([
+            "fade", "left", "right", "top", "bottom", 
+            "wipe", "wave", "grow", "center", "any", "outer", "random"
+        ])
+        transition_layout.addWidget(self.transition_combo)
+        transition_layout.addStretch()
+
+        app_layout.addLayout(transition_layout)
 
         app_group.setLayout(app_layout)
         layout.addWidget(app_group)
 
         return panel
+
 
     def load_themes(self):
         self.theme_list.clear()
@@ -134,6 +193,70 @@ class ThemeManagerWindow(QMainWindow):
             self.lbl_theme_name.setText(theme['name'])
             self.lbl_theme_author.setText(f"Author: {theme.get('author', 'Unknown')}")
             self.update_color_preview_tabs(theme['colors'])
+        
+        # UPDATE WALLPAPER INFO
+        self.update_wallpaper_info(theme_name)
+
+    def update_wallpaper_info(self, theme_name: str):
+        """Update wallpaper preview and info"""
+        wp_info = self.theme_manager.get_theme_wallpaper_info(theme_name)
+
+        count = wp_info['count']
+        if count > 0:
+            self.lbl_wallpaper_count.setText(f"🖼️  {count} wallpaper{'s' if count != 1 else ''} available")
+
+            # Show random wallpaper preview
+            import random
+            wallpaper = random.choice(wp_info['wallpapers'])
+            pixmap = QPixmap(str(wallpaper))
+
+            if not pixmap.isNull():
+                # Scale to fit preview
+                scaled = pixmap.scaled(
+                    400, 200, 
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                self.wallpaper_preview.setPixmap(scaled)
+            else:
+                self.wallpaper_preview.setText(f"Preview: {wallpaper.name}")
+        else:
+            self.lbl_wallpaper_count.setText("No wallpapers found")
+            self.wallpaper_preview.setText(
+                f"Add wallpapers to:\n{wp_info['directory']}"
+            )
+
+    def refresh_wallpaper_preview(self):
+        """Refresh wallpaper preview"""
+        current = self.theme_list.currentItem()
+        if current:
+            self.update_wallpaper_info(current.text())
+
+    def open_wallpaper_directory(self):
+        """Open wallpaper directory in file manager"""
+        current = self.theme_list.currentItem()
+        if not current:
+            QMessageBox.warning(self, "No Theme", "Please select a theme first.")
+            return
+
+        theme_name = current.text()
+        wp_info = self.theme_manager.get_theme_wallpaper_info(theme_name)
+        wp_dir = wp_info['directory']
+
+        # Create directory if it doesn't exist
+        wp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Open in file manager
+        import subprocess
+        try:
+            subprocess.Popen(['xdg-open', str(wp_dir)])
+        except Exception as e:
+            QMessageBox.information(
+                self, 
+                "Wallpaper Directory", 
+                f"Wallpaper directory:\n{wp_dir}\n\nAdd images here for this theme."
+            )
+    
 
     def update_color_preview_tabs(self, colors):
         """Update color preview organized in tabs by application"""
@@ -199,11 +322,20 @@ class ThemeManagerWindow(QMainWindow):
         theme_name = current.text()
         selected_apps = [app for app, cb in self.app_checkboxes.items() if cb.isChecked()]
 
-        if not selected_apps:
+        if not selected_apps and not self.cb_apply_wallpaper.isChecked():
             QMessageBox.warning(self, "No Applications", "Please select at least one application.")
             return
 
-        success = self.theme_manager.apply_theme(theme_name, selected_apps)
+        # Get wallpaper settings
+        apply_wallpaper = self.cb_apply_wallpaper.isChecked()
+        transition = self.transition_combo.currentText()
+
+        success = self.theme_manager.apply_theme(
+            theme_name, 
+            selected_apps,
+            apply_wallpaper=apply_wallpaper,
+            transition=transition
+        )
 
         if success:
             apps_str = ", ".join(selected_apps)
