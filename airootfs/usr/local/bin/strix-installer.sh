@@ -570,9 +570,9 @@ su - "$USERNAME" -c '
      fi
   fi
 '
-pipx install yfinance --break-system-packages
+pip install yfinance --break-system-packages
 pip install feedparser --break-system-packages
-pipx install PyQt6 --break-system-packages
+pip install PyQt6 --break-system-packages
 # Remove the temporary sudoers drop-in
 rm -f /etc/sudoers.d/99-"$USERNAME"-nopasswd
 
