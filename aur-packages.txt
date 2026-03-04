@@ -10,3 +10,5 @@ jellyfin-desktop
 sddm-silent-theme
 xdg-desktop-portal-termfilechooser-hunkyburrito-git
 xdg-desktop-portal-luminous
+vesktop-bin
+zen-browser-bin

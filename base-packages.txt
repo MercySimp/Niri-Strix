@@ -3,7 +3,6 @@ base-devel
 btop
 btrfs-progs
 eza
-firefox
 fish
 foot
 starship
@@ -50,7 +49,6 @@ xwayland-satellite
 dunst
 ttf-jetbrains-mono-nerd
 python-pip
-python-pipx
 ttf-dejavu
 ttf-droid
 ttf-inconsolata
