@@ -8,3 +8,5 @@ bitwarden-bin
 vesktop-bin
 jellyfin-desktop
 sddm-silent-theme
+xdg-desktop-portal-termfilechooser-hunkyburrito-git
+xdg-desktop-portal-luminous

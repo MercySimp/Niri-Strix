@@ -17,6 +17,7 @@ KEYMAP=""
 ENCRYPT="" # "Yes"/"No"
 USERPASS=""
 ROOTPASS=""
+GFX_DRIVER=""
 NIRI_STRIX_REPO="MercySimp/Niri-Strix"
 PARU_REPO="Morganamilo/Paru"
 PARU_DIR="${HOME}/.local/share/paru"
@@ -47,6 +48,7 @@ EOF
 }
 
 summary() {
+  detect_gpu_driver
   gum style --margin "1 2" --padding "0 2" --border normal --border-foreground 240 \
     "Disk:       ${DISK:-<not set>}
 Hostname:   ${HOSTNAME:-<not set>}
@@ -55,7 +57,8 @@ Full name:  ${FULLNAME:-<not set>}
 Email:      ${EMAIL:-<not set>}
 Timezone:   ${TIMEZONE:-<not set>}
 Keymap:     ${KEYMAP:-<not set>}
-Encryption: ${ENCRYPT:-<not set>}"
+Encryption: ${ENCRYPT:-<not set>}
+GPU Driver: ${GFX_DRIVER:-<not detected>}"
 }
 
 # -----------------------------
@@ -108,6 +111,26 @@ pick_disk() {
     DISK=""
     return 1
   }
+}
+
+detect_gpu_driver() {
+  local gpu_info
+  gpu_info=$(lspci 2>/dev/null | grep -Ei "vga|3d|display")
+
+  if echo "$gpu_info" | grep -qi "nvidia"; then
+    GFX_DRIVER="Nvidia (open-source nouveau driver)"
+  elif echo "$gpu_info" | grep -qi "amd\|radeon\|advanced micro"; then
+    GFX_DRIVER="AMD / ATI (open-source)"
+  elif echo "$gpu_info" | grep -qi "intel"; then
+    GFX_DRIVER="Intel (open-source)"
+  else
+    GFX_DRIVER="All open-source"
+  fi
+}
+
+pick_gpu_driver() {
+  local options=("Nvidia" "AMD / ATI" "Intel" "All open-source")
+  GFX_DRIVER=$(printf '%s\n' "${options[@]}" | gum choose --header "Select GPU driver (auto-detected: ${GFX_DRIVER:-unknown}")
 }
 
 pick_timezone() {
@@ -362,7 +385,7 @@ generate_config() {
   "packages": [ ${packages_json} ],
   "parallel_downloads": 0,
   "profile_config": {
-    "gfx_driver": "All open-source",
+    "gfx_driver": "${GFX_DRIVER}",
     "greeter": "sddm",
     "profile": {
       "custom_settings": {},
@@ -573,6 +596,12 @@ su - "$USERNAME" -c '
 pip install yfinance --break-system-packages
 pip install feedparser --break-system-packages
 pip install PyQt6 --break-system-packages
+
+cat > /usr/share/xdg-desktop-portal/niri-portals.conf << 'EOF'
+  [preferred]
+  default=luminous;gtk;
+  org.freedesktop.impl.portal.FileChooser=termfilechooser
+  EOF
 # Remove the temporary sudoers drop-in
 rm -f /etc/sudoers.d/99-"$USERNAME"-nopasswd
 
@@ -704,7 +733,7 @@ spin_fn() {
   local title="$1"
   local fn="$2"
   local rc=0
-  export DISK HOSTNAME USERNAME FULLNAME EMAIL TIMEZONE KEYMAP ENCRYPT USERPASS ROOTPASS
+  export DISK HOSTNAME USERNAME FULLNAME EMAIL TIMEZONE KEYMAP ENCRYPT USERPASS ROOTPASS GFX_DRIVER
   export NIRI_STRIX_REPO NIRI_STRIX_DIR PACKAGES_FILE PACKAGES_AUR
   export -f "$fn"
   export -f read_packages_file
@@ -798,10 +827,10 @@ main_menu() {
     echo
 
     choice=$(printf '%s\n' \
-      "Disk" "Hostname/User/Git" "Timezone" "Keyboard" "Encryption" "Password" \
+      "Disk" "Hostname/User/Git" "Timezone" "Keyboard" "Encryption" "Password" "GPU Driver" \
       "View archinstall JSON" "View creds JSON" \
       "Install" "Quit" |
-      gum choose --header "Select an item to edit:" --selected "${last_choice}")
+      gum choose --height 11 --header "Select an item to edit:" --selected "${last_choice}")
 
     last_choice="$choice"
 
@@ -812,6 +841,7 @@ main_menu() {
     "Keyboard") pick_keymap ;;
     "Encryption") pick_encryption ;;
     "Password") enter_password ;;
+    "GPU Driver") pick_gpu_driver ;;
     "View archinstall JSON") view_archinstall_json ;;
     "View creds JSON") view_creds_json ;;
     "Install") run_install ;;

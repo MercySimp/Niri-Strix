@@ -51,3 +51,12 @@ dunst
 ttf-jetbrains-mono-nerd
 python-pip
 python-pipx
+ttf-dejavu
+ttf-droid
+ttf-inconsolata
+ttf-indic-otf
+ttf-liberation
+noto-fonts
+noto-fonts-cjk
+noto-fonts-emoji
+xdg-desktop-portal-gtk
