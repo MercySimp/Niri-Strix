@@ -1,0 +1,16 @@
+##[pylyzer] failed /home/tonys/Niri-Strix/airootfs/root/bin/theme_manager/parsers/niri_parser.py 1771172466 1889
+.___v_desugar_1: Never
+.Path: Never
+.___v_desugar_2: Never
+.Dict: Never
+.Any: Never
+.re: Never
+
+.___v_desugar_3: Never
+.ThemeParser: Never
+.NiriParser: ClassType
+.NiriParser <: Never
+.NiriParser.parse: (self: parsers.niri_parser.NiriParser, file_path: Obj) -> global::Dict!({Str: Str})
+.NiriParser.generate: Never
+.NiriParser.apply: (self: parsers.niri_parser.NiriParser, theme_file: Obj, target_config: Obj) -> NoneType
+

@@ -1,0 +1,16 @@
+##[pylyzer] failed /home/tonys/Niri-Strix/airootfs/root/bin/theme_manager/parsers/dunst_parser.py 1771172466 2945
+.___v_desugar_1: Never
+.Path: Never
+.___v_desugar_2: Never
+.Dict: Never
+.Any: Never
+.re: Never
+
+.___v_desugar_3: Never
+.ThemeParser: Never
+.DunstParser: ClassType
+.DunstParser <: Never
+.DunstParser.parse: (self: parsers.dunst_parser.DunstParser, file_path: Obj) -> global::Dict!({Str: Str})
+.DunstParser.generate: Never
+.DunstParser.apply: (self: parsers.dunst_parser.DunstParser, theme_file: Obj, target_config: Obj) -> NoneType
+

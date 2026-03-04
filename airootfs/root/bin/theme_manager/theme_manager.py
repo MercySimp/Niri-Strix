@@ -2,7 +2,14 @@ from pathlib import Path
 import json
 from typing import Dict, List, Any, Optional
 
-from config import THEME_MANAGER_DIR, THEMES_FILE, STATE_FILE, APP_CONFIGS, ACTIVE_CONFIGS, WALLS_DIR
+from config import (
+    THEME_MANAGER_DIR,
+    THEMES_FILE,
+    STATE_FILE,
+    APP_CONFIGS,
+    ACTIVE_CONFIGS,
+    WALLS_DIR,
+)
 from parsers.btop_parser import BtopParser
 from parsers.dunst_parser import DunstParser
 from parsers.kitty_parser import KittyParser
@@ -12,18 +19,20 @@ from parsers.rofi_parser import RofiParser
 from parsers.superfile_parser import SuperfileParser
 from parsers.waybar_parser import WaybarParser
 from wallpaper_manager import WallpaperManager
+from shutil import copy2
+
 
 class ThemeManager:
     def __init__(self):
         self.parsers = {
-            'btop': BtopParser(),
-            'kitty': KittyParser(),
-            'niri': NiriParser(),
-            'nvim': NvimParser(),
-            'waybar': WaybarParser(),      
-            'superfile': SuperfileParser(), 
-            'rofi': RofiParser(),          
-            'dunst': DunstParser(),        
+            "btop": BtopParser(),
+            "kitty": KittyParser(),
+            "niri": NiriParser(),
+            "nvim": NvimParser(),
+            "waybar": WaybarParser(),
+            "superfile": SuperfileParser(),
+            "rofi": RofiParser(),
+            "dunst": DunstParser(),
         }
         self.wallpaper_manager = WallpaperManager(WALLS_DIR)
         self.ensure_dirs()
@@ -37,16 +46,16 @@ class ThemeManager:
         if not THEMES_FILE.exists():
             return []
         try:
-            with open(THEMES_FILE, 'r') as f:
+            with open(THEMES_FILE, "r") as f:
                 data = json.load(f)
-            return data.get('themes', [])
+            return data.get("themes", [])
         except:
             return []
 
     def get_theme(self, name: str) -> Optional[Dict[str, Any]]:
         themes = self.list_themes()
         for theme in themes:
-            if theme['name'] == name:
+            if theme["name"] == name:
                 return theme
         return None
 
@@ -55,7 +64,7 @@ class ThemeManager:
             themes = self.list_themes()
             existing = None
             for i, t in enumerate(themes):
-                if t['name'] == theme['name']:
+                if t["name"] == theme["name"]:
                     existing = i
                     break
 
@@ -64,8 +73,8 @@ class ThemeManager:
             else:
                 themes.append(theme)
 
-            with open(THEMES_FILE, 'w') as f:
-                json.dump({'themes': themes}, f, indent=2)
+            with open(THEMES_FILE, "w") as f:
+                json.dump({"themes": themes}, f, indent=2)
 
             self.generate_theme_files(theme)
             return True
@@ -76,10 +85,10 @@ class ThemeManager:
     def delete_theme(self, name: str) -> bool:
         try:
             themes = self.list_themes()
-            themes = [t for t in themes if t['name'] != name]
+            themes = [t for t in themes if t["name"] != name]
 
-            with open(THEMES_FILE, 'w') as f:
-                json.dump({'themes': themes}, f, indent=2)
+            with open(THEMES_FILE, "w") as f:
+                json.dump({"themes": themes}, f, indent=2)
 
             for app, theme_dir in APP_CONFIGS.items():
                 theme_file = theme_dir / f"{name}.{self.get_extension(app)}"
@@ -94,22 +103,30 @@ class ThemeManager:
     def generate_theme_files(self, theme: Dict[str, Any]):
         for app, parser in self.parsers.items():
             try:
-                content = parser.generate(theme['colors'], {
-                    'name': theme['name'],
-                    'author': theme.get('author', 'Theme Manager'),
-                    'variant': theme.get('variant', 'dark')
-                })
+                content = parser.generate(
+                    theme["colors"],
+                    {
+                        "name": theme["name"],
+                        "author": theme.get("author", "Theme Manager"),
+                        "variant": theme.get("variant", "dark"),
+                    },
+                )
 
                 theme_dir = APP_CONFIGS[app]
                 theme_file = theme_dir / f"{theme['name']}.{self.get_extension(app)}"
 
-                with open(theme_file, 'w') as f:
+                with open(theme_file, "w") as f:
                     f.write(content)
             except Exception as e:
                 print(f"Error generating {app} theme: {e}")
-    
-    
-    def apply_theme(self, name: str, apps: List[str], apply_wallpaper: bool = False, transition: str = "fade") -> bool:
+
+    def apply_theme(
+        self,
+        name: str,
+        apps: List[str],
+        apply_wallpaper: bool = False,
+        transition: str = "fade",
+    ) -> bool:
         theme = self.get_theme(name)
         if not theme:
             return False
@@ -124,54 +141,53 @@ class ThemeManager:
                 theme_file = theme_dir / f"{name}.{self.get_extension(app)}"
 
                 if theme_file.exists() and app in ACTIVE_CONFIGS:
-                    parser = self.parsers[app]
-                    parser.apply(theme_file, ACTIVE_CONFIGS[app])
-
+                    copy2(theme_file, ACTIVE_CONFIGS[app])
             # Apply wallpaper BEFORE return
             if apply_wallpaper:
                 self.wallpaper_manager.set_random_wallpaper(name, transition)
 
             # Save state with wallpaper info
-            self.save_state({
-                'current_theme': name, 
-                'apps': apps,
-                'wallpaper_enabled': apply_wallpaper,
-                'wallpaper_transition': transition
-            })
-        
+            self.save_state(
+                {
+                    "current_theme": name,
+                    "apps": apps,
+                    "wallpaper_enabled": apply_wallpaper,
+                    "wallpaper_transition": transition,
+                }
+            )
+
             return True
         except Exception as e:
             print(f"Error applying theme: {e}")
             return False
 
-   
     def save_state(self, state: Dict[str, Any]):
         try:
-            with open(STATE_FILE, 'w') as f:
+            with open(STATE_FILE, "w") as f:
                 json.dump(state, f, indent=2)
         except:
             pass
 
     def get_extension(self, app: str) -> str:
         extensions = {
-            'btop': 'theme',
-            'kitty': 'conf',
-            'niri': 'kdl',
-            'nvim': 'lua',
-            'waybar': 'css',
-            'superfile': 'toml',
-            'rofi': 'rasi',
-            'dunst': 'conf',
+            "btop": "theme",
+            "kitty": "conf",
+            "niri": "kdl",
+            "nvim": "lua",
+            "waybar": "css",
+            "superfile": "toml",
+            "rofi": "rasi",
+            "dunst": "conf",
         }
-        return extensions.get(app, 'conf')
+        return extensions.get(app, "conf")
 
     def get_theme_wallpaper_info(self, theme_name: str) -> dict:
         """Get wallpaper information for a theme"""
         wallpapers = self.wallpaper_manager.get_theme_wallpapers(theme_name)
         return {
-            'count': len(wallpapers),
-            'wallpapers': wallpapers,
-            'directory': self.wallpaper_manager.walls_dir / theme_name
+            "count": len(wallpapers),
+            "wallpapers": wallpapers,
+            "directory": self.wallpaper_manager.walls_dir / theme_name,
         }
 
     def import_from_existing(self, name: str, author: str = "Imported"):
@@ -189,10 +205,10 @@ class ThemeManager:
 
         if colors:
             theme = {
-                'name': name,
-                'author': author,
-                'variant': 'dark',
-                'colors': colors
+                "name": name,
+                "author": author,
+                "variant": "dark",
+                "colors": colors,
             }
             return self.save_theme(theme)
         return False

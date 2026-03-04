@@ -1,0 +1,16 @@
+##[pylyzer] failed /home/tonys/Niri-Strix/airootfs/root/bin/theme_manager/parsers/waybar_parser.py 1772587052 2248
+.___v_desugar_1: Never
+.Path: Never
+.___v_desugar_2: Never
+.Dict: Never
+.Any: Never
+.re: Never
+
+.___v_desugar_3: Never
+.ThemeParser: Never
+.WaybarParser: ClassType
+.WaybarParser <: Never
+.WaybarParser.parse: (self: parsers.waybar_parser.WaybarParser, file_path: Obj) -> global::Dict!({Str: Str})
+.WaybarParser.generate: Never
+.WaybarParser.apply: (self: parsers.waybar_parser.WaybarParser, theme_file: Obj, target_config: Obj) -> NoneType
+

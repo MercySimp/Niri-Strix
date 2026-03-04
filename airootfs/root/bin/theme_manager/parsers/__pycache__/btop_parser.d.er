@@ -1,0 +1,16 @@
+##[pylyzer] failed /home/tonys/Niri-Strix/airootfs/root/bin/theme_manager/parsers/btop_parser.py 1771172466 1810
+.___v_desugar_1: Never
+.Path: Never
+.___v_desugar_2: Never
+.Dict: Never
+.Any: Never
+.re: Never
+
+.___v_desugar_3: Never
+.ThemeParser: Never
+.BtopParser: ClassType
+.BtopParser <: Never
+.BtopParser.parse: (self: parsers.btop_parser.BtopParser, file_path: Obj) -> global::Dict!({Str: Str})
+.BtopParser.generate: Never
+.BtopParser.apply: (self: parsers.btop_parser.BtopParser, theme_file: Obj, target_config: Obj) -> NoneType
+

@@ -1,0 +1,14 @@
+##[pylyzer] failed /home/tonys/Niri-Strix/airootfs/root/bin/theme_manager/parsers/kitty_parser.py 1771172466 1794
+.___v_desugar_1: Never
+.Path: Never
+.___v_desugar_2: Never
+.Dict: Never
+.Any: Never
+.___v_desugar_3: Never
+.ThemeParser: Never
+.KittyParser: ClassType
+.KittyParser <: Never
+.KittyParser.parse: (self: parsers.kitty_parser.KittyParser, file_path: Obj) -> global::Dict!({Str: Str})
+.KittyParser.generate: Never
+.KittyParser.apply: (self: parsers.kitty_parser.KittyParser, theme_file: Obj, target_config: Obj) -> NoneType
+

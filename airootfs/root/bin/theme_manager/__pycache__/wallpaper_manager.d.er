@@ -1,0 +1,19 @@
+##[pylyzer] failed /home/tonys/Niri-Strix/airootfs/root/bin/theme_manager/wallpaper_manager.py 1772498860 3449
+.___v_desugar_1: Never
+.Path: Never
+.subprocess: Never
+
+.random: Never
+
+.___v_desugar_2: Never
+.Optional: Never
+.List: Never
+.WallpaperManager: ClassType
+.WallpaperManager.walls_dir: Never
+.WallpaperManager.__call__: (walls_dir: Obj) -> wallpaper_manager.WallpaperManager
+.WallpaperManager.get_theme_wallpapers: Never
+.WallpaperManager.set_wallpaper: (self: wallpaper_manager.WallpaperManager, image_path: Obj, transition: Str := Str) -> Bool
+.WallpaperManager.set_random_wallpaper: (self: wallpaper_manager.WallpaperManager, theme_name: Str, transition: Str := Str) -> Bool
+.WallpaperManager.create_theme_wallpaper_dir: (self: wallpaper_manager.WallpaperManager, theme_name: Str) -> Never
+.WallpaperManager.get_available_transitions: (self: wallpaper_manager.WallpaperManager) -> global::List!(Str, _: Nat)
+

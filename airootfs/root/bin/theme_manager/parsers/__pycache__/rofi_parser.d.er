@@ -1,0 +1,16 @@
+##[pylyzer] failed /home/tonys/Niri-Strix/airootfs/root/bin/theme_manager/parsers/rofi_parser.py 1771172466 1396
+.___v_desugar_1: Never
+.Path: Never
+.___v_desugar_2: Never
+.Dict: Never
+.Any: Never
+.re: Never
+
+.___v_desugar_3: Never
+.ThemeParser: Never
+.RofiParser: ClassType
+.RofiParser <: Never
+.RofiParser.parse: (self: parsers.rofi_parser.RofiParser, file_path: Obj) -> global::Dict!({Str: Str})
+.RofiParser.generate: Never
+.RofiParser.apply: (self: parsers.rofi_parser.RofiParser, theme_file: Obj, target_config: Obj) -> NoneType
+
