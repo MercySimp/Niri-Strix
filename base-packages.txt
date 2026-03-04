@@ -20,6 +20,7 @@ linux-zen-headers
 neovim
 niri
 openssh
+pacman-contrib
 rofi
 sddm
 smartmontools

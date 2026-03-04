@@ -314,5 +314,11 @@
     "tooltip": true,
     "interval": 3600,
     "on-click": "xdg-open https://archlinux.org/news/"
-  }
+  },
+  "custom/theme_manager": {
+  "format":" ",
+  "on-click": "/bin/theme_manager/main.py",
+  "tooltip": true,
+  "tooltip-format": "Theme Manager"
+}
 }
