@@ -3,55 +3,66 @@ from typing import Dict, Any
 import re
 from parsers.base import ThemeParser
 
+
 class NiriParser(ThemeParser):
+    @property
+    def app_name(self):
+        return "niri"
+
     def parse(self, file_path: Path) -> Dict[str, str]:
         colors = {}
-        with open(file_path, 'r') as f:
+        self.store_source(file_path, colors)
+        with open(file_path, "r") as f:
             content = f.read()
-
-        for match in re.finditer(r'(active-color|inactive-color|urgent-color)\s+"([^"]+)"', content):
+        for match in re.finditer(
+            r'(active-color|inactive-color|urgent-color)\s+"([^"]+)"', content
+        ):
             key, value = match.groups()
             colors[f"niri_{key}"] = value
-
-        width_match = re.search(r'width\s+([\d.]+)', content)
+        width_match = re.search(r"width\s+([\d.]+)", content)
         if width_match:
-            colors['niri_border_width'] = width_match.group(1)
-
+            colors["niri_border_width"] = width_match.group(1)
         return colors
 
     def generate(self, colors: Dict[str, str], metadata: Dict[str, Any]) -> str:
-        width = colors.get('niri_border_width', '2.2')
-        active = colors.get('niri_active-color', '#BE3F50')
-        inactive = colors.get('niri_inactive-color', '#0e091d')
-        urgent = colors.get('niri_urgent-color', '#14B9B5')
+        if self.source_key() in colors:
+            content = colors[self.source_key()]
+            for key, value in colors.items():
+                if key.startswith("niri_") and key != "niri_border_width":
+                    config_key = key.replace("niri_", "")
+                    content = re.sub(
+                        rf'({re.escape(config_key)}\s+)"[^"]+"',
+                        rf'\g<1>"{value}"',
+                        content,
+                    )
+            if "niri_border_width" in colors:
+                content = re.sub(
+                    r"(width\s+)[\d.]+", rf"\g<1>{colors['niri_border_width']}", content
+                )
+            return content
 
-        lines = [
-            'layout {',
-            '    border {',
-            f'        width {width}',
-            f'        active-color "{active}"',
-            f'        inactive-color "{inactive}"',
-            f'        urgent-color "{urgent}"',
-            '    }',
-            '}',
-        ]
-        return '\n'.join(lines)
+        width = colors.get("niri_border_width", "2.2")
+        active = colors.get("niri_active-color", "#BE3F50")
+        inactive = colors.get("niri_inactive-color", "#0e091d")
+        urgent = colors.get("niri_urgent-color", "#14B9B5")
+        return "\n".join(
+            [
+                "layout {",
+                "    border {",
+                f"        width {width}",
+                f'        active-color "{active}"',
+                f'        inactive-color "{inactive}"',
+                f'        urgent-color "{urgent}"',
+                "    }",
+                "}",
+            ]
+        )
 
     def apply(self, theme_file: Path, target_config: Path):
-        if not target_config.exists():
+        import shutil
+
+        if not theme_file.exists() or theme_file.stat().st_size == 0:
             return
-
-        with open(target_config, 'r') as f:
-            content = f.read()
-
-        with open(theme_file, 'r') as f:
-            theme_content = f.read()
-
-        if 'layout {' in content:
-            pattern = r'layout\s*{[^}]*border\s*{[^}]*}[^}]*}'
-            content = re.sub(pattern, theme_content.strip(), content, flags=re.DOTALL)
-        else:
-            content += '\n\n' + theme_content
-
-        with open(target_config, 'w') as f:
-            f.write(content)
+        if not target_config.exists():
+            target_config.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(theme_file, target_config)

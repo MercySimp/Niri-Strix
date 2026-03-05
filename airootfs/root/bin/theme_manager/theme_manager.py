@@ -111,6 +111,8 @@ class ThemeManager:
                         "variant": theme.get("variant", "dark"),
                     },
                 )
+                if not content.strip():
+                    continue
 
                 theme_dir = APP_CONFIGS[app]
                 theme_file = theme_dir / f"{theme['name']}.{self.get_extension(app)}"
@@ -141,7 +143,7 @@ class ThemeManager:
                 theme_file = theme_dir / f"{name}.{self.get_extension(app)}"
 
                 if theme_file.exists() and app in ACTIVE_CONFIGS:
-                    copy2(theme_file, ACTIVE_CONFIGS[app])
+                    self.parsers[app].apply(theme_file, ACTIVE_CONFIGS[app])
             # Apply wallpaper BEFORE return
             if apply_wallpaper:
                 self.wallpaper_manager.set_random_wallpaper(name, transition)

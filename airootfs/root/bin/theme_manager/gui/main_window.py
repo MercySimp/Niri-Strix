@@ -1,8 +1,19 @@
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QPushButton, QListWidget, QLabel, QMessageBox,
-    QGroupBox, QCheckBox, QScrollArea, QGridLayout, QInputDialog,
-    QTabWidget, QComboBox
+    QMainWindow,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QListWidget,
+    QLabel,
+    QMessageBox,
+    QGroupBox,
+    QCheckBox,
+    QScrollArea,
+    QGridLayout,
+    QInputDialog,
+    QTabWidget,
+    QComboBox,
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
@@ -10,6 +21,7 @@ from PyQt6.QtGui import QPixmap
 from theme_manager import ThemeManager
 from gui.color_widget import ColorPreviewWidget
 from gui.theme_editor import ThemeEditorDialog
+
 
 class ThemeManagerWindow(QMainWindow):
     def __init__(self):
@@ -86,7 +98,7 @@ class ThemeManagerWindow(QMainWindow):
         self.lbl_theme_author = QLabel("")
         info_layout.addWidget(self.lbl_theme_author)
 
-         # ADD WALLPAPER INFO
+        # ADD WALLPAPER INFO
         self.lbl_wallpaper_count = QLabel("")
         self.lbl_wallpaper_count.setStyleSheet("color: #14B9B5;")
         info_layout.addWidget(self.lbl_wallpaper_count)
@@ -94,7 +106,7 @@ class ThemeManagerWindow(QMainWindow):
         info_group.setLayout(info_layout)
         layout.addWidget(info_group)
 
-            # ADD WALLPAPER PREVIEW SECTION
+        # ADD WALLPAPER PREVIEW SECTION
         wallpaper_group = QGroupBox("Wallpaper Preview")
         wallpaper_layout = QVBoxLayout()
 
@@ -102,7 +114,9 @@ class ThemeManagerWindow(QMainWindow):
         self.wallpaper_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.wallpaper_preview.setMinimumHeight(150)
         self.wallpaper_preview.setMaximumHeight(200)
-        self.wallpaper_preview.setStyleSheet("border: 1px solid #555; background: #1a1a1a;")
+        self.wallpaper_preview.setStyleSheet(
+            "border: 1px solid #555; background: #1a1a1a;"
+        )
         self.wallpaper_preview.setScaledContents(True)
         wallpaper_layout.addWidget(self.wallpaper_preview)
 
@@ -161,10 +175,22 @@ class ThemeManagerWindow(QMainWindow):
         transition_layout.addWidget(QLabel("Transition:"))
 
         self.transition_combo = QComboBox()
-        self.transition_combo.addItems([
-            "fade", "left", "right", "top", "bottom", 
-            "wipe", "wave", "grow", "center", "any", "outer", "random"
-        ])
+        self.transition_combo.addItems(
+            [
+                "fade",
+                "left",
+                "right",
+                "top",
+                "bottom",
+                "wipe",
+                "wave",
+                "grow",
+                "center",
+                "any",
+                "outer",
+                "random",
+            ]
+        )
         transition_layout.addWidget(self.transition_combo)
         transition_layout.addStretch()
 
@@ -175,12 +201,11 @@ class ThemeManagerWindow(QMainWindow):
 
         return panel
 
-
     def load_themes(self):
         self.theme_list.clear()
         themes = self.theme_manager.list_themes()
         for theme in themes:
-            self.theme_list.addItem(theme['name'])
+            self.theme_list.addItem(theme["name"])
 
     def on_theme_selected(self, current, previous):
         if not current:
@@ -190,10 +215,10 @@ class ThemeManagerWindow(QMainWindow):
         theme = self.theme_manager.get_theme(theme_name)
 
         if theme:
-            self.lbl_theme_name.setText(theme['name'])
+            self.lbl_theme_name.setText(theme["name"])
             self.lbl_theme_author.setText(f"Author: {theme.get('author', 'Unknown')}")
-            self.update_color_preview_tabs(theme['colors'])
-        
+            self.update_color_preview_tabs(theme["colors"])
+
         # UPDATE WALLPAPER INFO
         self.update_wallpaper_info(theme_name)
 
@@ -201,21 +226,25 @@ class ThemeManagerWindow(QMainWindow):
         """Update wallpaper preview and info"""
         wp_info = self.theme_manager.get_theme_wallpaper_info(theme_name)
 
-        count = wp_info['count']
+        count = wp_info["count"]
         if count > 0:
-            self.lbl_wallpaper_count.setText(f"🖼️  {count} wallpaper{'s' if count != 1 else ''} available")
+            self.lbl_wallpaper_count.setText(
+                f"🖼️  {count} wallpaper{'s' if count != 1 else ''} available"
+            )
 
             # Show random wallpaper preview
             import random
-            wallpaper = random.choice(wp_info['wallpapers'])
+
+            wallpaper = random.choice(wp_info["wallpapers"])
             pixmap = QPixmap(str(wallpaper))
 
             if not pixmap.isNull():
                 # Scale to fit preview
                 scaled = pixmap.scaled(
-                    400, 200, 
+                    400,
+                    200,
                     Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
+                    Qt.TransformationMode.SmoothTransformation,
                 )
                 self.wallpaper_preview.setPixmap(scaled)
             else:
@@ -241,22 +270,22 @@ class ThemeManagerWindow(QMainWindow):
 
         theme_name = current.text()
         wp_info = self.theme_manager.get_theme_wallpaper_info(theme_name)
-        wp_dir = wp_info['directory']
+        wp_dir = wp_info["directory"]
 
         # Create directory if it doesn't exist
         wp_dir.mkdir(parents=True, exist_ok=True)
 
         # Open in file manager
         import subprocess
+
         try:
-            subprocess.Popen(['xdg-open', str(wp_dir)])
+            subprocess.Popen(["xdg-open", str(wp_dir)])
         except Exception as e:
             QMessageBox.information(
-                self, 
-                "Wallpaper Directory", 
-                f"Wallpaper directory:\n{wp_dir}\n\nAdd images here for this theme."
+                self,
+                "Wallpaper Directory",
+                f"Wallpaper directory:\n{wp_dir}\n\nAdd images here for this theme.",
             )
-    
 
     def update_color_preview_tabs(self, colors):
         """Update color preview organized in tabs by application"""
@@ -266,12 +295,14 @@ class ThemeManagerWindow(QMainWindow):
         # Group colors by application
         app_colors = {}
         for key, value in colors.items():
-            if not value.startswith('#'):
+            if "__" in key:
+                continue
+            if not value.startswith("#"):
                 continue
 
             # Extract app prefix
-            if '_' in key:
-                app = key.split('_')[0]
+            if "_" in key:
+                app = key.split("_")[0]
                 if app not in app_colors:
                     app_colors[app] = []
                 app_colors[app].append((key, value))
@@ -311,7 +342,9 @@ class ThemeManagerWindow(QMainWindow):
 
             # Add tab with capitalized app name and color count
             color_count = len(app_colors[app_name])
-            self.color_tabs.addTab(tab_widget, f"{app_name.capitalize()} ({color_count})")
+            self.color_tabs.addTab(
+                tab_widget, f"{app_name.capitalize()} ({color_count})"
+            )
 
     def apply_theme(self):
         current = self.theme_list.currentItem()
@@ -320,10 +353,14 @@ class ThemeManagerWindow(QMainWindow):
             return
 
         theme_name = current.text()
-        selected_apps = [app for app, cb in self.app_checkboxes.items() if cb.isChecked()]
+        selected_apps = [
+            app for app, cb in self.app_checkboxes.items() if cb.isChecked()
+        ]
 
         if not selected_apps and not self.cb_apply_wallpaper.isChecked():
-            QMessageBox.warning(self, "No Applications", "Please select at least one application.")
+            QMessageBox.warning(
+                self, "No Applications", "Please select at least one application."
+            )
             return
 
         # Get wallpaper settings
@@ -331,16 +368,17 @@ class ThemeManagerWindow(QMainWindow):
         transition = self.transition_combo.currentText()
 
         success = self.theme_manager.apply_theme(
-            theme_name, 
+            theme_name,
             selected_apps,
             apply_wallpaper=apply_wallpaper,
-            transition=transition
+            transition=transition,
         )
 
         if success:
             apps_str = ", ".join(selected_apps)
-            QMessageBox.information(self, "Success", 
-                f"Theme '{theme_name}' applied to: {apps_str}")
+            QMessageBox.information(
+                self, "Success", f"Theme '{theme_name}' applied to: {apps_str}"
+            )
         else:
             QMessageBox.warning(self, "Error", "Failed to apply theme.")
 
@@ -366,17 +404,24 @@ class ThemeManagerWindow(QMainWindow):
                 self.theme_list.setCurrentItem(items[0])
 
     def import_theme(self):
-        name, ok = QInputDialog.getText(self, "Import Theme", 
-            "Enter theme name to search for in config files:")
+        name, ok = QInputDialog.getText(
+            self, "Import Theme", "Enter theme name to search for in config files:"
+        )
         if ok and name:
             if self.theme_manager.import_from_existing(name):
                 self.load_themes()
-                QMessageBox.information(self, "Success", 
-                    f"Imported theme '{name}' from existing config files")
+                QMessageBox.information(
+                    self,
+                    "Success",
+                    f"Imported theme '{name}' from existing config files",
+                )
             else:
-                QMessageBox.warning(self, "Error", 
+                QMessageBox.warning(
+                    self,
+                    "Error",
                     f"Could not find theme '{name}' in config files.\n"
-                    f"Make sure theme files exist in your ~/.config/*/themes/ directories")
+                    f"Make sure theme files exist in your ~/.config/*/themes/ directories",
+                )
 
     def delete_theme(self):
         current = self.theme_list.currentItem()
@@ -387,14 +432,16 @@ class ThemeManagerWindow(QMainWindow):
         theme_name = current.text()
 
         reply = QMessageBox.question(
-            self, 
-            "Confirm Deletion", 
+            self,
+            "Confirm Deletion",
             f"Are you sure you want to delete the theme '{theme_name}'?\n"
             f"This will remove it from all application theme directories.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
         if reply == QMessageBox.StandardButton.Yes:
             if self.theme_manager.delete_theme(theme_name):
                 self.load_themes()
-                QMessageBox.information(self, "Deleted", f"Theme '{theme_name}' deleted.")
+                QMessageBox.information(
+                    self, "Deleted", f"Theme '{theme_name}' deleted."
+                )
