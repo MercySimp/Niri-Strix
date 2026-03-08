@@ -85,11 +85,9 @@ class DunstParser(ThemeParser):
         shutil.copy2(theme_file, target_config)
 
         # Reload dunst by killing and restarting it
-        print("Testing")
         try:
             # Kill existing instance
             subprocess.run(["pkill", "dunst"], capture_output=True)
-            print("Dunst reloaded")
             # Small delay to ensure it's fully stopped
             import time
 

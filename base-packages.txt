@@ -59,3 +59,5 @@ noto-fonts
 noto-fonts-cjk
 noto-fonts-emoji
 xdg-desktop-portal-gtk
+libqalculate
+qalculate-qt

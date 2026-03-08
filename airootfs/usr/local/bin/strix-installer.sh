@@ -597,11 +597,11 @@ pip install yfinance --break-system-packages
 pip install feedparser --break-system-packages
 pip install PyQt6 --break-system-packages
 
-cat > /usr/share/xdg-desktop-portal/niri-portals.conf << 'EOF'
+cat > /usr/share/xdg-desktop-portal/niri-portals.conf << EOF
   [preferred]
   default=luminous;gtk;
   org.freedesktop.impl.portal.FileChooser=termfilechooser
-  EOF
+EOF
 # Remove the temporary sudoers drop-in
 rm -f /etc/sudoers.d/99-"$USERNAME"-nopasswd
 
@@ -815,6 +815,238 @@ read_packages_file() {
 }
 
 # -----------------------------
+# Additional Packages
+# -----------------------------
+
+_add_packages() {
+  mkdir -p "$(dirname "$PACKAGES_FILE")" "$(dirname "$PACKAGES_AUR")"
+  touch "$PACKAGES_FILE" "$PACKAGES_AUR"
+
+  # ── Repo selector ──────────────────────────────────────────────────────────
+  local source
+  source=$(printf '%s\n' "Pacman (official repos)" "AUR" "Back" |
+    gum choose --header "Which repository would you like to search?")
+  [[ "$source" == "Back" || -z "$source" ]] && return 0
+
+  # ── Official repos branch ──────────────────────────────────────────────────
+  if [[ "$source" == "Pacman (official repos)" ]]; then
+
+    gum spin --title "Loading official package list..." -- \
+      bash -c "pacman -Ssq 2>/dev/null | sort -u > /tmp/_strix_pac_list.txt"
+
+    if [[ ! -s /tmp/_strix_pac_list.txt ]]; then
+      gum style --foreground 196 \
+        "Could not load package list — run 'pacman -Sy' first."
+      rm -f /tmp/_strix_pac_list.txt
+      pause
+      return 1
+    fi
+
+    local pac_total
+    pac_total=$(wc -l </tmp/_strix_pac_list.txt)
+
+    local selected
+    selected=$(gum filter --no-limit \
+      --placeholder "Type to fuzzy-search  ·  TAB = toggle  ·  ENTER = confirm" \
+      --header "Official packages  (${pac_total} available)" \
+      </tmp/_strix_pac_list.txt)
+    rm -f /tmp/_strix_pac_list.txt
+    [[ -z "$selected" ]] && return 0
+
+    local added=() skipped=()
+    while IFS= read -r pkg; do
+      [[ -z "$pkg" ]] && continue
+      if grep -qxF "$pkg" "$PACKAGES_FILE" 2>/dev/null ||
+        grep -qxF "$pkg" "$PACKAGES_AUR" 2>/dev/null; then
+        skipped+=("$pkg")
+      else
+        echo "$pkg" >>"$PACKAGES_FILE"
+        added+=("$pkg")
+      fi
+    done <<<"$selected"
+
+    local msg="Pacman results:"
+    ((${#added[@]})) && msg+=$'\n'"  Added   → ${added[*]}"
+    ((${#skipped[@]})) && msg+=$'\n'"  Skipped (already listed) → ${skipped[*]}"
+    gum style --border normal --padding "1 2" "$msg"
+    pause
+
+  # ── AUR branch ────────────────────────────────────────────────────────────
+  else
+
+    local query
+    query=$(gum input \
+      --placeholder "e.g. niri waybar dunst" \
+      --header "AUR search keyword  (2 characters minimum)")
+
+    if [[ -z "$query" || ${#query} -lt 2 ]]; then
+      gum style --foreground 196 "Search term must be at least 2 characters."
+      pause
+      return 0
+    fi
+
+    # Fetch + format: name (padded) | version | popularity | description
+    gum spin --title "Searching AUR for '${query}'..." -- bash -c "
+      curl -sf 'https://aur.archlinux.org/rpc/v5/search/${query}?by=name-desc' \
+        | python3 -c '
+import sys, json
+data  = json.load(sys.stdin)
+items = sorted(
+    data.get(\"results\", []),
+    key=lambda x: x.get(\"Popularity\", 0),
+    reverse=True,
+)
+for r in items:
+    name = r[\"Name\"]
+    ver  = r.get(\"Version\", \"\")[:22]
+    pop  = r.get(\"Popularity\", 0)
+    desc = (r.get(\"Description\") or \"\")[:60]
+    print(f\"{name:<42}  {ver:<24}  \u2605{pop:>6.1f}  {desc}\")
+' > /tmp/_strix_aur_results.txt 2>/dev/null
+    "
+
+    if [[ ! -s /tmp/_strix_aur_results.txt ]]; then
+      gum style --foreground 196 \
+        "No AUR results for '${query}' — check spelling or network."
+      rm -f /tmp/_strix_aur_results.txt
+      pause
+      return 0
+    fi
+
+    local aur_total
+    aur_total=$(wc -l </tmp/_strix_aur_results.txt)
+
+    local selected
+    selected=$(gum filter --no-limit \
+      --placeholder "Type to fuzzy-filter  ·  TAB = toggle  ·  ENTER = confirm" \
+      --header "AUR results for '${query}'  (${aur_total} found, sorted by popularity)" \
+      </tmp/_strix_aur_results.txt)
+    rm -f /tmp/_strix_aur_results.txt
+    [[ -z "$selected" ]] && return 0
+
+    local added=() skipped=()
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      local pkg
+      pkg=$(awk '{print $1}' <<<"$line") # name is always the first token
+      if grep -qxF "$pkg" "$PACKAGES_FILE" 2>/dev/null ||
+        grep -qxF "$pkg" "$PACKAGES_AUR" 2>/dev/null; then
+        skipped+=("$pkg")
+      else
+        echo "$pkg" >>"$PACKAGES_AUR"
+        added+=("$pkg")
+      fi
+    done <<<"$selected"
+
+    local msg="AUR results:"
+    ((${#added[@]})) && msg+=$'\n'"  Added   → ${added[*]}"
+    ((${#skipped[@]})) && msg+=$'\n'"  Skipped (already listed) → ${skipped[*]}"
+    gum style --border normal --padding "1 2" "$msg"
+    pause
+  fi
+}
+
+# Builds a unified tagged list from both files and removes the chosen entry.
+_remove_package() {
+  local entries=()
+
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" =~ ^# ]] && continue
+    entries+=("[pacman] $line")
+  done < <(cat "$PACKAGES_FILE" 2>/dev/null)
+
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" =~ ^# ]] && continue
+    entries+=("[aur]    $line")
+  done < <(cat "$PACKAGES_AUR" 2>/dev/null)
+
+  if ((${#entries[@]} == 0)); then
+    gum style --foreground 196 "No additional packages are listed yet."
+    pause
+    return 0
+  fi
+
+  local sel
+  sel=$(printf '%s\n' "${entries[@]}" |
+    gum choose --height 15 --header "Select a package to remove:")
+  [[ -z "$sel" ]] && return 0
+
+  local source pkg
+  if [[ "$sel" == \[pacman\]* ]]; then
+    source="pacman"
+    pkg="${sel#\[pacman\] }"
+  else
+    source="aur"
+    pkg="${sel#\[aur\]    }"
+  fi
+  pkg="$(echo "$pkg" | xargs)" # trim any stray whitespace
+
+  gum confirm "Remove '$pkg' from the $source list?" --default=false || return 0
+
+  if [[ "$source" == "pacman" ]]; then
+    sed -i "/^${pkg}$/d" "$PACKAGES_FILE"
+  else
+    sed -i "/^${pkg}$/d" "$PACKAGES_AUR"
+  fi
+
+  gum style --foreground 46 "'$pkg' removed from $source list."
+  pause
+}
+
+# Top-level submenu called from main_menu.
+pick_additional_packages() {
+  while true; do
+    clear
+    banner
+
+    # Live counts from both files
+    local pac_count=0 aur_count=0
+    [[ -f "$PACKAGES_FILE" ]] &&
+      pac_count=$(grep -cvE '^[[:space:]]*(#|$)' "$PACKAGES_FILE" 2>/dev/null || echo 0)
+    [[ -f "$PACKAGES_AUR" ]] &&
+      aur_count=$(grep -cvE '^[[:space:]]*(#|$)' "$PACKAGES_AUR" 2>/dev/null || echo 0)
+
+    gum style --border normal --padding "1 2" \
+      "Additional Packages
+
+  Pacman : ${pac_count} package(s)   → $(basename "$PACKAGES_FILE")
+  AUR    : ${aur_count} package(s)   → $(basename "$PACKAGES_AUR")"
+    echo
+
+    local action
+    action=$(printf '%s\n' \
+      "Add package(s)" \
+      "Remove a package" \
+      "View pacman list" \
+      "View AUR list" \
+      "Back" |
+      gum choose --height 10 --header "Package management:")
+
+    case "$action" in
+    "Add package(s)") _add_packages ;;
+    "Remove a package") _remove_package ;;
+    "View pacman list")
+      if [[ -s "$PACKAGES_FILE" ]]; then
+        gum pager <"$PACKAGES_FILE"
+      else
+        gum style --foreground 196 "Pacman list is empty."
+        pause
+      fi
+      ;;
+    "View AUR list")
+      if [[ -s "$PACKAGES_AUR" ]]; then
+        gum pager <"$PACKAGES_AUR"
+      else
+        gum style --foreground 196 "AUR list is empty."
+        pause
+      fi
+      ;;
+    "Back") return 0 ;;
+    esac
+  done
+}
+
+# -----------------------------
 # Main wizard
 # -----------------------------
 main_menu() {
@@ -827,10 +1059,10 @@ main_menu() {
     echo
 
     choice=$(printf '%s\n' \
-      "Disk" "Hostname/User/Git" "Timezone" "Keyboard" "Encryption" "Password" "GPU Driver" \
+      "Disk" "Hostname/User/Git" "Timezone" "Keyboard" "Encryption" "Password" "GPU Driver" "Additional Packages" \
       "View archinstall JSON" "View creds JSON" \
       "Install" "Quit" |
-      gum choose --height 11 --header "Select an item to edit:" --selected "${last_choice}")
+      gum choose --height 12 --header "Select an item to edit:" --selected "${last_choice}")
 
     last_choice="$choice"
 
@@ -842,6 +1074,7 @@ main_menu() {
     "Encryption") pick_encryption ;;
     "Password") enter_password ;;
     "GPU Driver") pick_gpu_driver ;;
+    "Additional Packages") pick_additional_packages ;;
     "View archinstall JSON") view_archinstall_json ;;
     "View creds JSON") view_creds_json ;;
     "Install") run_install ;;

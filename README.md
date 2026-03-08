@@ -23,3 +23,7 @@ Back from vacation and added a bunch of fonts and began some more coding to fix 
 Also looking into adding an option for the user to select what graphics drivers they need but also have the program tell what graphics card the user has. So it will do a read of the graphics card and say, "Nvidia card defaulting to X drivers" but still give the user the chance to change it manually if for some reason the program is wrong, or the user just wants other drivers.
 
 Oh also working on the theme manager some more sill. I don't like some of the things the parser is skipping, so have to revamp that.
+
+At this point it is mostly how I want it to be. Probably introduce the coding for the drive encryption since archinstall handles that anyway. Along with working on the theme mapping for rofi and python. But honestly? I am happy. This whole project was a lot of fun and at this point the intentions are getting more personalized. Functionality is there and now just playing.
+
+I know the installer takes awhile that is because of the post install process, making paru and then installing all the packages from AUR take awhile. OHHHH lets add that, AUR and Pacman additional packages selection so the user can adjust as they see fit. Will work on the ISO once done with the installer as building the iso and testing it takes awhile. Confirmed it worked on an earlier version but haven't tested since.
