@@ -25,17 +25,18 @@ binds {
     // Binds for Launching Apps
     Mod+Return { spawn "kitty"; } //open terminal
     Mod+D { spawn "bash" "-c" "$HOME/.config/rofi/applets/bin/launcher.sh"; } // Application Launcher
-    Mod+E { spawn "kitty" "spf"; } // Open File Explorer
-    Mod+shift+E { spawn "kitty" "sudo" "spf"; } // Open File Explorer
+    Mod+E { spawn "kitty" "--class" "spf" "-e" "spf"; } // Open File Explorer
+    Mod+shift+E { spawn "kitty" "--class" "spf" "-e" "sudo" "spf"; } // Open File Explorer
     Mod+V { spawn "zen-browser"; } // Open Browser
     Mod+shift+V { spawn "zen-browser --private-window"; } // Open Browser Private
-    Mod+A {spawn "kitty" "btop";} // btop activity viewer
+    Mod+A {spawn "kitty" "--class" "btop" "-e" "btop";} // btop activity viewer
     Mod+P {spawn "bitwarden-desktop";} // password manager
-    Mod+N {spawn "kitty" "nvim";} //neovim I want to learn it so might as well
+    Mod+N {spawn "kitty" "--class" "nvim" "-e" "nvim" ;} //neovim I want to learn it so might as well
     Mod+U {spawn "zen-browser" "perplexity.ai";} //perplexity is free for the year so it wins for my AI shortcut
     Mod+O {spawn "kitty" "lazydocker";} //lazy docker
     Mod+G {spawn "obsidian";} // obsidian
-    Mod+S {spawn "localsend";} //localsend
+    //Mod+S {spawn "localsend";} //localsend
+    Mod+S {spawn "bash" "-c" "echo 'tag:terminal' | socat - UNIX-CONNECT:/tmp/niri-tiler-wayland-0.sock";}
 
 
 

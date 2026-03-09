@@ -97,7 +97,9 @@ parser.add_argument(
 # Keys become the command name sent over the socket
 TAG_PATTERNS: dict[str, list[str]] = {
     "terminal": ["alacritty", "foot", "kitty", "wezterm", "ghostty"],
-    "browser":  ["firefox", "chromium", "chrome", "zen"],
+    "browser": ["firefox", "chromium", "chrome", "zen"],
+    "coding": ["nvim", "vim", "code"],
+    "files": ["spf", "nautilus", "thundar", "dolphin"],
 }
 
 # Tracks pulled windows per tag: {tag_name: {win_id: original_workspace_id}}
@@ -315,6 +317,7 @@ class TilerCommandServer:
         # Unblock the accept() by connecting briefly
         try:
             import socket as _s
+
             _s.socket(_s.AF_UNIX, _s.SOCK_STREAM).connect(self._path)
         except Exception:
             pass
@@ -324,6 +327,7 @@ class TilerCommandServer:
 
     def _run(self):
         import socket as _s
+
         srv = _s.socket(_s.AF_UNIX, _s.SOCK_STREAM)
         srv.bind(self._path)
         srv.listen(8)
@@ -462,6 +466,7 @@ def collapse_window(
 
     return need_collapse
 
+
 def handle_tag_toggle(tag_name: str):
     if tag_name not in TAG_PATTERNS:
         print(f"Unknown tag: '{tag_name}'")
@@ -527,9 +532,9 @@ def handle_tag_toggle(tag_name: str):
             tag_state[tag_name] = new_origin_map
             # Register in-flight windows — retile fires when the last one arrives
             tag_pull_win_ids.update(new_origin_map.keys())
-            pending_retile_counts[current_wspace_id] = (
-                pending_retile_counts.get(current_wspace_id, 0) + len(new_origin_map)
-            )
+            pending_retile_counts[current_wspace_id] = pending_retile_counts.get(
+                current_wspace_id, 0
+            ) + len(new_origin_map)
 
 
 def retile_workspace(workspace_id: int):
@@ -572,8 +577,7 @@ def retile_workspace(workspace_id: int):
             win_state, workspace_id=workspace_id, is_floating=False
         )
         right_col_wins = [
-            wid for wid, wdata in curr_tile_wins.items()
-            if wdata.get("col_idx") == 1
+            wid for wid, wdata in curr_tile_wins.items() if wdata.get("col_idx") == 1
         ]
         if right_col_wins:
             target_id = right_col_wins[0]
@@ -584,7 +588,7 @@ def retile_workspace(workspace_id: int):
     if 3 < num_tile_wins <= TILE_TO_N:
         newest_id = max(
             curr_tile_wins.keys(),
-            key=lambda wid: curr_tile_wins[wid].get("focus_timestamp", 0)
+            key=lambda wid: curr_tile_wins[wid].get("focus_timestamp", 0),
         )
         niri_action.action("ConsumeOrExpelWindowLeft", id=newest_id)
 
@@ -658,7 +662,6 @@ try:
     init_time = timekeeper.get_time_elapsed_ms()
     pending_retile_wspace: int | None = None
     for evt_name, evt_data in niri_reader.read_eventstream():
-
         # ── Process any pending tiler commands ─────────────────────────
         while True:
             try:
@@ -859,19 +862,21 @@ try:
             # Apply tiling if needed
             is_zero_max_windows = num_max_wins == 0
             if is_zero_max_windows and (2 < num_tile_wins <= TILE_TO_N):
-
                 if num_tile_wins == 3:
                     mid_wins = [
-                        wid for wid, wdata in curr_tile_wins.items()
+                        wid
+                        for wid, wdata in curr_tile_wins.items()
                         if wdata.get("col_idx") == 1 and wid != newest_window_data["id"]
                     ]
                     target_id = mid_wins[0] if mid_wins else newest_window_data["id"]
                     niri_action.action("FocusColumnRight")
                     niri_action.action("ConsumeOrExpelWindowRight", id=target_id)
                 else:
-                    niri_action.action("ConsumeOrExpelWindowLeft", id=newest_window_data["id"])
+                    niri_action.action(
+                        "ConsumeOrExpelWindowLeft", id=newest_window_data["id"]
+                    )
             pass
-            
+
             # ── Deferred retile from tag pull ──────────────────────────────────
             if pending_retile_wspace is not None:
                 retile_workspace(pending_retile_wspace)
