@@ -16,4 +16,5 @@ spawn-at-startup "$HOME/.config/walls/toggle-walls.sh"
 spawn-at-startup "xwayland-satellite"
 spawn-at-startup "/usr/lib/polkit-kde-authentication-agent-1"
 spawn-at-startup "$HOME/.config/sway/idle"
+spawn-at-startup "python3" "/usr/bin/niri_tile_to_n.py"
 // --panscan=1.0
