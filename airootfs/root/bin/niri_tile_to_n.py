@@ -10,12 +10,13 @@ import json
 import os
 import signal
 import argparse
+import select
+import threading
 from dataclasses import dataclass
 from time import perf_counter, sleep
 from collections import deque
 from queue import Queue, Empty
-import threading
-import re
+
 
 # ---------------------------------------------------------------------------------------------------------------------
 # %% Args
@@ -44,37 +45,27 @@ parser.add_argument(
     "-delay",
     default=default_delay_ms,
     type=int,
-    help=f"Number of milliseconds to delay before listening to niri IPC (default: {
-        default_delay_ms
-    })",
+    help=f"Number of milliseconds to delay before listening to niri IPC (default: {default_delay_ms})",
 )
 parser.add_argument(
     "-x",
     action="store_false" if default_maximize_solos else "store_true",
-    help=f"Auto-maximize first window opened on a workspace (default: {
-        default_maximize_solos
-    })",
+    help=f"Auto-maximize first window opened on a workspace (default: {default_maximize_solos})",
 )
 parser.add_argument(
     "-xc",
     action="store_false" if default_maximize_solo_on_close else "store_true",
-    help=f"When closing windows, if one window remains, auto-maximize it (default: {
-        default_maximize_solo_on_close
-    })",
+    help=f"When closing windows, if one window remains, auto-maximize it (default: {default_maximize_solo_on_close})",
 )
 parser.add_argument(
     "-c",
     action="store_false" if default_collapse_solos_on_open else "store_true",
-    help=f"Collapse solo maximized window when opening a second window (default: {
-        default_collapse_solos_on_open
-    })",
+    help=f"Collapse solo maximized window when opening a second window (default: {default_collapse_solos_on_open})",
 )
 parser.add_argument(
     "-m",
     action="store_false" if default_apply_on_move else "store_true",
-    help=f"Apply tiling logic to windows that are moved into other workspaces (default: {
-        default_apply_on_move
-    })",
+    help=f"Apply tiling logic to windows that are moved into other workspaces (default: {default_apply_on_move})",
 )
 parser.add_argument(
     "-e",
@@ -93,27 +84,26 @@ parser.add_argument(
     help="Enable event data printing, for debugging",
 )
 
-# Define tag patterns (app_id substring match, case-insensitive)
-# Keys become the command name sent over the socket
 TAG_PATTERNS: dict[str, list[str]] = {
     "terminal": ["alacritty", "foot", "kitty", "wezterm", "ghostty"],
-    "browser": ["firefox", "chromium", "chrome", "zen"],
-    "coding": ["nvim", "vim", "code"],
-    "files": ["spf", "nautilus", "thundar", "dolphin"],
+    "browser": ["firefox", "chromium", "chrome", "zen-browser"],
 }
 
-# Tracks pulled windows per tag: {tag_name: {win_id: original_workspace_id}}
-# None / missing key = not currently pulled
-tag_state: dict[str, dict[int, int]] = {}
+# tag_state: {tag_name: {win_id: {"workspace_id": int, "workspace_idx": int}}}
+tag_state: dict[str, dict[int, dict]] = {}
+# win_id -> destination workspace for windows currently being tag-pulled
+tag_pull_win_ids: dict[int, int] = {}
 
-# workspace_id → how many tag-pulled windows are still in-flight
-pending_retile_counts: dict[int, int] = {}
-
-# win IDs currently in-flight from a tag pull (suppress normal tiling for them)
-tag_pull_win_ids: set[int] = set()
-
-# Thread-safe queue for commands arriving on the IPC socket
+# workspace_id -> state for an in-flight pull batch
+# {
+#   "base_count": <tiled windows already on workspace before pull>,
+#   "arrived": 0,
+#   "total": <number of windows being pulled>,
+# }
+tag_pull_batches: dict[int, dict] = {}
+tag_pushback_win_ids: set[int] = set() 
 cmd_queue: Queue = Queue()
+TILER_SOCKET_PATH = f"/tmp/niri-tiler-{os.getenv('WAYLAND_DISPLAY', 'wayland-0')}.sock"
 
 # Get script configs
 args, _ = parser.parse_known_args()
@@ -178,7 +168,7 @@ class NiriSocket:
         self._msg_queue = deque([])
         self._inprog_str = None
 
-    def _read_next(self):
+    def _read_next(self, timeout: float | None = None):
 
         # Read from existing (buffered) messages, if any
         if len(self._msg_queue) > 0:
@@ -186,6 +176,13 @@ class NiriSocket:
             return json.loads(next_msg)
 
         while True:
+            # If a timeout is given, use select() to avoid blocking forever.
+            # Returns None on timeout so the caller can do other work (e.g. drain cmd_queue).
+            if timeout is not None:
+                ready, _, _ = select.select([self._skt], [], [], timeout)
+                if not ready:
+                    return None
+
             # Listen for raw (binary) string data from socket
             # -> Will return 0 bytes if connection closes
             resp_binstr = self._skt.recv(self._bufsize)
@@ -265,7 +262,11 @@ class NiriRequests(NiriSocket):
 
         # Read events from stream, forever
         while True:
-            event_json = self._read_next()
+            event_json = self._read_next(timeout=0.05)
+            if event_json is None:
+                # No event received within timeout, return to main loop to do other work (e.g. drain cmd_queue)
+                yield None, None
+                continue
             event_name = tuple(event_json.keys())[0]
             event_data = event_json.get(event_name, None)
             yield event_name, event_data
@@ -291,16 +292,12 @@ class NiriActions(NiriSocket):
         return is_ok_resp, resp_data
 
 
-TILER_SOCKET_PATH = f"/tmp/niri-tiler-{os.getenv('WAYLAND_DISPLAY', 'wayland-0')}.sock"
-
-
 class TilerCommandServer:
     """
     Minimal Unix socket server that receives plain-text commands
     (one per connection) and enqueues them for the main loop.
-    e.g.  echo "tag:terminal" | socat - UNIX-CONNECT:/tmp/niri-tiler-*.sock
+    e.g. echo "tag:terminal" | socat - UNIX-CONNECT:/tmp/niri-tiler-*.sock
     """
-
     def __init__(self, socket_path: str, queue: Queue):
         self._path = socket_path
         self._queue = queue
@@ -314,10 +311,8 @@ class TilerCommandServer:
 
     def stop(self):
         self._stop.set()
-        # Unblock the accept() by connecting briefly
         try:
             import socket as _s
-
             _s.socket(_s.AF_UNIX, _s.SOCK_STREAM).connect(self._path)
         except Exception:
             pass
@@ -327,7 +322,6 @@ class TilerCommandServer:
 
     def _run(self):
         import socket as _s
-
         srv = _s.socket(_s.AF_UNIX, _s.SOCK_STREAM)
         srv.bind(self._path)
         srv.listen(8)
@@ -356,33 +350,20 @@ def make_workspace_state_from_WorkspacesChanged(event_data: dict) -> dict[int, d
     return {info_dict["id"]: info_dict for info_dict in event_data["workspaces"]}
 
 
-def make_window_state_from_WindowsChanged(
-    event_data: dict, workspace_state, output_width_lut: dict
-) -> dict[int, dict]:
+def make_window_state_from_WindowsChanged(event_data: dict, workspace_state, output_width_lut: dict) -> dict[int, dict]:
     state = {}
     for info_dict in event_data["windows"]:
         win_id = info_dict["id"]
-        win_aug_data = get_additional_window_data(
-            info_dict, workspace_state, output_width_lut
-        )
+        win_aug_data = get_additional_window_data(info_dict, workspace_state, output_width_lut)
         info_dict.update(win_aug_data)
         state[win_id] = info_dict
     return state
 
 
-def get_windows_by_conditions(
-    window_state: dict[int, dict], **conditions
-) -> dict[int, dict]:
+def get_windows_by_conditions(window_state: dict[int, dict], **conditions) -> dict[int, dict]:
     """Function used to filter window state data according to key-value conditions"""
-
-    def meets_conditions(data):
-        return all(data[k] == v for k, v in conditions.items())
-
-    return {
-        winid: windata
-        for winid, windata in window_state.items()
-        if meets_conditions(windata)
-    }
+    meets_conditions = lambda data: all(data[k] == v for k, v in conditions.items())
+    return {winid: windata for winid, windata in window_state.items() if meets_conditions(windata)}
 
 
 def get_additional_window_data(
@@ -416,22 +397,16 @@ def toggle_window_maximization(target_window_id: int, focused_window_id: int):
     """Helper used to toggle the maximization state of a window, without messing with current focused window"""
 
     if target_window_id == focused_window_id:
-        niri_action.action(
-            "MaximizeWindowToEdges" if USE_MAX_TO_EDGES else "MaximizeColumn"
-        )
+        niri_action.action("MaximizeWindowToEdges" if USE_MAX_TO_EDGES else "MaximizeColumn")
     else:
         niri_action.action("FocusWindow", id=target_window_id)
-        niri_action.action(
-            "MaximizeWindowToEdges" if USE_MAX_TO_EDGES else "MaximizeColumn"
-        )
+        niri_action.action("MaximizeWindowToEdges" if USE_MAX_TO_EDGES else "MaximizeColumn")
         niri_action.action("FocusWindow", id=focused_window_id)
 
     return
 
 
-def maximize_window(
-    window_state: dict, focus_state: FocusState, target_window_id: int
-) -> bool:
+def maximize_window(window_state: dict, focus_state: FocusState, target_window_id: int) -> bool:
     """
     Helper used to maximize a window if it's not already maximized.
     This function assumes window state includes 'is_maximized' flag!
@@ -448,9 +423,7 @@ def maximize_window(
     return need_maximization
 
 
-def collapse_window(
-    window_state: dict, focus_state: FocusState, target_window_id: int
-) -> bool:
+def collapse_window(window_state: dict, focus_state: FocusState, target_window_id: int) -> bool:
     """
     Helperused to collapse a maximized window. This function assumes
     that the window state includes 'is_maximized' flag!
@@ -466,7 +439,6 @@ def collapse_window(
 
     return need_collapse
 
-
 def handle_tag_toggle(tag_name: str):
     if tag_name not in TAG_PATTERNS:
         print(f"Unknown tag: '{tag_name}'")
@@ -479,119 +451,114 @@ def handle_tag_toggle(tag_name: str):
     origin_map = tag_state.get(tag_name)
 
     if origin_map:
-        # ── Push back ──────────────────────────────────────────────────────
-        for win_id, orig_wspace_id in list(origin_map.items()):
-            if win_id in win_state:
-                ok, resp = niri_action.action(
-                    "MoveWindowToWorkspace",
-                    window_id=win_id,
-                    reference={"Id": orig_wspace_id},
-                    focus=False,
+        for win_id, origin in list(origin_map.items()):
+            if win_id not in win_state:
+                continue
+
+            orig_id = origin["workspace_id"]
+            orig_idx = origin["workspace_idx"]
+            orig_name = origin.get("workspace_name")
+            orig_output = origin.get("workspace_output")
+
+            # Verify the stored ID still points to the right output
+            current_wspace_data = wspace_state.get(orig_id, {})
+            id_output_matches = current_wspace_data.get("output") == orig_output
+
+            if orig_id in wspace_state and id_output_matches:
+                reference = {"Id": orig_id}
+            elif orig_name:
+                print(f"[tag] ID output mismatch or gone, pushing back by name '{orig_name}'")
+                reference = {"Name": orig_name}
+            else:
+                # Last resort: find workspace on the correct output by index
+                correct_wspace = next(
+                    (
+                        ws for ws in wspace_state.values()
+                        if ws.get("output") == orig_output and ws.get("idx") == orig_idx
+                    ),
+                    None,
                 )
-                if ok:
-                    # Remove immediately so retile sees the correct remaining count
-                    win_state.pop(win_id, None)
+                if correct_wspace:
+                    print(f"[tag] falling back to output-matched workspace ID {correct_wspace['id']}")
+                    reference = {"Id": correct_wspace["id"]}
                 else:
-                    print(f"  [tag] push-back failed: {resp}")
+                    print(f"[tag] could not find workspace on output {orig_output}, using index {orig_idx}")
+                    reference = {"Index": orig_idx}
+
+            print(f"[tag] pushing back win {win_id} using reference {reference}")
+            ok, resp = niri_action.action(
+                "MoveWindowToWorkspace",
+                window_id=win_id,
+                reference=reference,
+                focus=False,
+            )
+            if ok:
+                tag_pushback_win_ids.add(win_id)
+            else:
+                print(f"[tag] push-back failed for {win_id}: {resp}")
 
         tag_state.pop(tag_name, None)
 
-        # Remaining windows have valid col_idx, retile is safe to call now
-        retile_workspace(current_wspace_id)
 
     else:
-        # ── Pull ───────────────────────────────────────────────────────────
+        # Pull
         patterns = TAG_PATTERNS[tag_name]
         new_origin_map: dict[int, int] = {}
-
         for win_id, win_data in win_state.items():
             if win_data.get("workspace_id") == current_wspace_id:
                 continue
             if win_data.get("is_floating"):
                 continue
+
             app_id = (win_data.get("app_id") or "").lower()
             if any(p in app_id for p in patterns):
-                new_origin_map[win_id] = win_data["workspace_id"]
+                orig_wspace_id = win_data["workspace_id"]
+                orig_wspace_data = wspace_state.get(orig_wspace_id, {})
+                orig_wspace_idx = wspace_state.get(orig_wspace_id, {}).get("idx", 0)
+                orig_wspace_output = orig_wspace_data.get("output", None)
+                new_origin_map[win_id] = {
+                    "workspace_id": orig_wspace_id,
+                    "workspace_idx": orig_wspace_idx,
+                    "workspace_name": orig_wspace_data.get("name", None),
+                    "workspace_output": orig_wspace_output,
+                }
 
         if not new_origin_map:
             print(f"No off-workspace windows matched tag '{tag_name}'")
             return
 
-        for win_id in new_origin_map:
+        existing_wins = get_windows_by_conditions(
+            win_state,
+            workspace_id=current_wspace_id,
+            is_floating=False,
+        )
+        base_count = len(existing_wins)
+
+        moved_origin_map: dict[int, int] = {}
+        moved_ids: list[int] = []
+
+        for win_id, orig_wspace_id in new_origin_map.items():
             ok, resp = niri_action.action(
                 "MoveWindowToWorkspace",
                 window_id=win_id,
                 reference={"Id": current_wspace_id},
                 focus=False,
             )
-            if not ok:
-                print(f"  [tag] pull failed: {resp}")
-                new_origin_map.pop(win_id, None)
+            if ok:
+                moved_origin_map[win_id] = orig_wspace_id
+                moved_ids.append(win_id)
+            else:
+                print(f"[tag] pull failed for {win_id}: {resp}")
 
-        if new_origin_map:
-            tag_state[tag_name] = new_origin_map
-            # Register in-flight windows — retile fires when the last one arrives
-            tag_pull_win_ids.update(new_origin_map.keys())
-            pending_retile_counts[current_wspace_id] = pending_retile_counts.get(
-                current_wspace_id, 0
-            ) + len(new_origin_map)
-
-
-def retile_workspace(workspace_id: int):
-    """Apply current tiling rules to one workspace based on its current window count."""
-    if workspace_id is None or win_state is None:
-        return
-
-    curr_tile_wins = get_windows_by_conditions(
-        win_state, workspace_id=workspace_id, is_floating=False
-    )
-    num_tile_wins = len(curr_tile_wins)
-
-    if num_tile_wins == 0 or num_tile_wins > TILE_TO_N:
-        return
-
-    # 1 window -> maximize if enabled
-    if MAXIMIZE_SOLOS and num_tile_wins == 1:
-        solo_id = tuple(curr_tile_wins.keys())[0]
-        maximize_window(win_state, focus_state, solo_id)
-        return
-
-    curr_max_wins = get_windows_by_conditions(curr_tile_wins, is_maximized=True)
-    num_max_wins = len(curr_max_wins)
-
-    # 2 windows -> collapse solo maximize if needed
-    if COLLAPSE_SOLOS_ON_OPEN and num_max_wins == 1 and num_tile_wins == 2:
-        solo_max_id = tuple(curr_max_wins.keys())[0]
-        collapse_window(win_state, focus_state, solo_max_id)
-        num_max_wins -= 1
-
-    if num_max_wins != 0:
-        return
-
-    # 3 windows -> force 2|1 layout
-    if num_tile_wins == 3:
-        niri_action.action("FocusColumnRight")
-        sleep(0.02)
-
-        curr_tile_wins = get_windows_by_conditions(
-            win_state, workspace_id=workspace_id, is_floating=False
-        )
-        right_col_wins = [
-            wid for wid, wdata in curr_tile_wins.items() if wdata.get("col_idx") == 1
-        ]
-        if right_col_wins:
-            target_id = right_col_wins[0]
-            niri_action.action("ConsumeOrExpelWindowRight", id=target_id)
-        return
-
-    # 4+ windows -> keep stacking right side
-    if 3 < num_tile_wins <= TILE_TO_N:
-        newest_id = max(
-            curr_tile_wins.keys(),
-            key=lambda wid: curr_tile_wins[wid].get("focus_timestamp", 0),
-        )
-        niri_action.action("ConsumeOrExpelWindowLeft", id=newest_id)
-
+        if moved_origin_map:
+            tag_state[tag_name] = moved_origin_map
+            tag_pull_batches[current_wspace_id] = {
+                "base_count": base_count,
+                "arrived": 0,
+                "total": len(moved_ids),
+            }
+            for win_id in moved_ids:
+                tag_pull_win_ids[win_id] = current_wspace_id
 
 # ---------------------------------------------------------------------------------------------------------------------
 # %% Setup
@@ -609,13 +576,14 @@ if skt_path is None or skt_path == "":
 # Create separate read/write sockets, since eventstream reader cannot issue actions
 niri_reader = NiriRequests(skt_path)
 niri_action = NiriActions(skt_path)
+cmd_server = TilerCommandServer(TILER_SOCKET_PATH, cmd_queue)
+cmd_server.start()
+print(f"Command socket: {TILER_SOCKET_PATH}")
+
 
 # Sanity check. Make sure we have the right version
 is_version_ok, version_resp = niri_reader.request("Version")
-expected_version, actual_version = (
-    "25.11 (b35bcae)",
-    version_resp.get("Version", "unknown"),
-)
+expected_version, actual_version = "25.11 (b35bcae)", version_resp.get("Version", "unknown")
 if actual_version != expected_version:
     print(
         "",
@@ -626,10 +594,6 @@ if actual_version != expected_version:
         sep="\n",
     )
 
-cmd_server = TilerCommandServer(TILER_SOCKET_PATH, cmd_queue)
-cmd_server.start()
-print(f"Command socket: {TILER_SOCKET_PATH}")
-
 
 # ---------------------------------------------------------------------------------------------------------------------
 # %% *** IPC listening loop ***
@@ -639,15 +603,8 @@ is_outputs_ok, outputs_resp = niri_reader.request("Outputs")
 if not is_outputs_ok:
     print("Error requesting info about monitors", outputs_resp, sep="\n")
     quit()
-output_full_info = {
-    out_key: out_dict["logical"]
-    for out_key, out_dict in outputs_resp["Outputs"].items()
-}
-output_width_lut = {
-    out_key: out_info["width"]
-    for out_key, out_info in output_full_info.items()
-    if out_info is not None
-}
+output_full_info = {out_key: out_dict["logical"] for out_key, out_dict in outputs_resp["Outputs"].items()}
+output_width_lut = {out_key: out_info["width"] for out_key, out_info in output_full_info.items() if out_info is not None}
 
 # Initialize state tracking
 prev_focus_state = FocusState()
@@ -660,9 +617,8 @@ wspace_state = None
 signal.signal(signal.SIGTERM, catch_sigterm)
 try:
     init_time = timekeeper.get_time_elapsed_ms()
-    pending_retile_wspace: int | None = None
     for evt_name, evt_data in niri_reader.read_eventstream():
-        # ── Process any pending tiler commands ─────────────────────────
+        
         while True:
             try:
                 cmd = cmd_queue.get_nowait()
@@ -670,16 +626,15 @@ try:
                     handle_tag_toggle(cmd[4:])
             except Empty:
                 break
+        
+        if evt_name is None:
+            continue
 
         # For debugging printouts, add spaces between events that don't occur together
         time_elapsed_ms = timekeeper.get_time_elapsed_ms()
         if ENABLE_EVENT_NAME_DEBUG_PRINT or ENABLE_EVENT_DATA_DEBUG_PRINT:
             if time_elapsed_ms > 250:
-                print(
-                    "",
-                    f"Time elapsed (sec): {(timekeeper.t2 - init_time) // 1000}",
-                    sep="\n",
-                )
+                print("", f"Time elapsed (sec): {(timekeeper.t2 - init_time) // 1000}", sep="\n")
             if ENABLE_EVENT_NAME_DEBUG_PRINT:
                 print(evt_name)
             if ENABLE_EVENT_DATA_DEBUG_PRINT:
@@ -720,9 +675,7 @@ try:
 
         elif evt_name == "WindowsChanged":
             # Replace existing window state
-            win_state = make_window_state_from_WindowsChanged(
-                evt_data, wspace_state, output_width_lut
-            )
+            win_state = make_window_state_from_WindowsChanged(evt_data, wspace_state, output_width_lut)
             for item in win_state.values():
                 if item["is_focused"]:
                     focus_state.window_id = item["id"]
@@ -742,14 +695,38 @@ try:
                 focus_state.window_id = evt_win_id
 
             # Replace existing window state for the target window
-            win_aug_data = get_additional_window_data(
-                evt_data["window"], wspace_state, output_width_lut
-            )
+            win_aug_data = get_additional_window_data(evt_data["window"], wspace_state, output_width_lut)
             win_state[evt_win_id] = {**evt_data["window"], **win_aug_data}
-            need_check_rearrange = evt_is_new_window or (
-                evt_is_moved_window and APPLY_TO_MOVED_WINDOWS
+            effective_num_tile_wins = None
+            is_tag_pulled_window = evt_is_moved_window and (evt_win_id in tag_pull_win_ids)
+
+            if is_tag_pulled_window:
+                batch_wspace_id = tag_pull_win_ids[evt_win_id]
+                batch = tag_pull_batches.get(batch_wspace_id)
+
+                if batch is not None:
+                    batch["arrived"] += 1
+                    effective_num_tile_wins = batch["base_count"] + batch["arrived"]
+                    print(
+                        f"[tag] pulled window {evt_win_id} arrived on workspace {batch_wspace_id}; "
+                        f"base={batch['base_count']} arrived={batch['arrived']} "
+                        f"effective_num_tile_wins={effective_num_tile_wins}"
+                    )
+
+                    if batch["arrived"] >= batch["total"]:
+                        tag_pull_batches.pop(batch_wspace_id, None)
+
+                tag_pull_win_ids.pop(evt_win_id, None)
+            need_check_rearrange = (
+                evt_is_new_window
+                or (evt_is_moved_window and APPLY_TO_MOVED_WINDOWS)
+                or is_tag_pulled_window
             )
+
             newest_window_data = win_state[evt_win_id] if need_check_rearrange else None
+
+            if newest_window_data is not None and effective_num_tile_wins is not None:
+                newest_window_data["_effective_num_tile_wins"] = effective_num_tile_wins
 
         elif evt_name == "WindowClosed":
             # Delete closed window state data & remove from windows-per-workspace mapping
@@ -774,9 +751,7 @@ try:
             # Replace existing window layout data
             for evt_win_id, evt_new_layout in evt_data["changes"]:
                 win_state[evt_win_id]["layout"] = evt_new_layout
-                win_aug_data = get_additional_window_data(
-                    win_state[evt_win_id], wspace_state, output_width_lut
-                )
+                win_aug_data = get_additional_window_data(win_state[evt_win_id], wspace_state, output_width_lut)
                 win_state[evt_win_id].update(win_aug_data)
             pass
 
@@ -799,94 +774,115 @@ try:
         else:
             print("Unknown event:", evt_name)
 
-        # Handle max-on-close and split-restore-on-close
+        # Handle max-on-close
         if closed_window_data is not None:
-            curr_wspace_id = closed_window_data["workspace_id"]
-            curr_wins = get_windows_by_conditions(
-                win_state, workspace_id=curr_wspace_id, is_floating=False
-            )
-
-            if MAXIMIZE_SOLOS_ON_CLOSE and len(curr_wins) == 1:
-                # 2 → 1 windows: maximize the remaining solo window
-                solo_id = tuple(curr_wins.keys())[0]
-                maximize_window(win_state, focus_state, solo_id)
-
-            elif len(curr_wins) == 2:
-                # 3 → 2 windows: if both remaining windows are stacked in the same
-                # column (because win2 was consumed left when win3 opened), expel
-                # the lower one rightward to restore the 1|1 split layout.
-                col_indices = {
-                    wdata.get("col_idx")
-                    for wdata in curr_wins.values()
-                    if wdata.get("col_idx") is not None
-                }
-                if len(col_indices) == 1:  # both windows share the same column
-                    expel_win_id = max(
-                        curr_wins.keys(),
-                        key=lambda wid: curr_wins[wid].get("row_idx") or 0,
-                    )
-                    niri_action.action("ConsumeOrExpelWindowRight", id=expel_win_id)
+            if MAXIMIZE_SOLOS_ON_CLOSE:
+                curr_wspace_id = closed_window_data["workspace_id"]
+                curr_wins = get_windows_by_conditions(win_state, workspace_id=curr_wspace_id, is_floating=False)
+                if len(curr_wins) == 1:
+                    solo_id = tuple(curr_wins.keys())[0]
+                    maximize_window(win_state, focus_state, solo_id)
+                pass
 
         # Handle window-creation behaviors
         if newest_window_data is not None:
+
             # Ignore newly created maximized or floating windows
             # -> Assume opened maximized windows are done by user window rules (don't want to interfere)
             # -> Tiling logic shouldn't apply to floating windows
-            if newest_window_data["is_maximized"] or newest_window_data["is_floating"]:
+            if newest_window_data["is_floating"]:
                 continue
 
             # Don't bother trying to re-arrange/tile if we already have more than 'N' windows
             curr_wspace_id = newest_window_data["workspace_id"]
-            curr_tile_wins = get_windows_by_conditions(
-                win_state, workspace_id=curr_wspace_id, is_floating=False
-            )
-            num_tile_wins = len(curr_tile_wins)
-            if num_tile_wins == 0 or num_tile_wins > TILE_TO_N:
-                continue
+            curr_tile_wins = get_windows_by_conditions(win_state, workspace_id=curr_wspace_id, is_floating=False)
+            actual_num_tile_wins = len(curr_tile_wins)
+            num_tile_wins = newest_window_data.get("_effective_num_tile_wins", actual_num_tile_wins)
 
             # Auto-maximize solo windows, if needed
             if MAXIMIZE_SOLOS and num_tile_wins == 1:
+                print(f"DEBUG - Auto-maximizing solo window {newest_window_data['id']}")
                 solo_id = tuple(curr_tile_wins.keys())[0]
-                maximize_window(win_state, focus_state, solo_id)
+                #maximize_window(win_state, focus_state, solo_id)
 
             # Collapse maximized windows, if needed
-            curr_max_wins: dict = get_windows_by_conditions(
-                curr_tile_wins, is_maximized=True
-            )
+            curr_max_wins: dict = get_windows_by_conditions(curr_tile_wins, is_maximized=True)
             num_max_wins = len(curr_max_wins)
             if COLLAPSE_SOLOS_ON_OPEN and num_max_wins == 1 and num_tile_wins == 2:
                 solo_max_id = tuple(curr_max_wins.keys())[0]
                 collapse_window(win_state, focus_state, solo_max_id)
                 num_max_wins -= 1
 
+            print(
+                f"DEBUG - newest={newest_window_data['id']} "
+                f"is_maximized={newest_window_data['is_maximized']} "
+                f"is_floating={newest_window_data['is_floating']} "
+                f"num_tile_wins={num_tile_wins} "
+                f"curr_tile_ids={list(curr_tile_wins.keys())} "
+                f"num_max_wins={num_max_wins} "
+                f"max_ids={list(curr_max_wins.keys())}"
+                )
+
+
             # Apply tiling if needed
             is_zero_max_windows = num_max_wins == 0
-            if is_zero_max_windows and (2 < num_tile_wins <= TILE_TO_N):
-                if num_tile_wins == 3:
-                    mid_wins = [
-                        wid
-                        for wid, wdata in curr_tile_wins.items()
-                        if wdata.get("col_idx") == 1 and wid != newest_window_data["id"]
-                    ]
-                    target_id = mid_wins[0] if mid_wins else newest_window_data["id"]
-                    niri_action.action("FocusColumnRight")
-                    niri_action.action("ConsumeOrExpelWindowRight", id=target_id)
-                else:
-                    niri_action.action(
-                        "ConsumeOrExpelWindowLeft", id=newest_window_data["id"]
-                    )
-            pass
+            cycle_pos = ((num_tile_wins - 1) % TILE_TO_N) + 1
+            print(f"DEBUG - Applying tiling action for new window (cycle pos: {cycle_pos})...")
 
-            # ── Deferred retile from tag pull ──────────────────────────────────
-            if pending_retile_wspace is not None:
-                retile_workspace(pending_retile_wspace)
-                pending_retile_wspace = None
+            if cycle_pos == 1:
+                # 1, 6, 11, ...
+                print(f"DEBUG - cycle 1 focused new window {newest_window_data['id']} for maximization")
+                niri_action.action("FocusWindow", id=newest_window_data["id"])
+                niri_action.action("MaximizeColumn")
+
+
+            elif cycle_pos == 2:
+                # 2, 7, 12, ...
+                curr_max_wins = get_windows_by_conditions(curr_tile_wins, is_maximized=True)
+                if len(curr_max_wins) == 1:
+                    solo_max_id = tuple(curr_max_wins.keys())[0]
+                    collapse_window(win_state, focus_state, solo_max_id)
+
+            elif cycle_pos == 3:
+                # 3, 8, 13, ...
+                target_id = newest_window_data["id"]
+                target_index = 1 + 2 * ((num_tile_wins - 1) // TILE_TO_N)
+
+                print(f"DEBUG - cycle 3 target_id={target_id} target_index={target_index}")
+                niri_action.action("FocusWindow", id=target_id)
+                niri_action.action("MoveColumnToIndex", index=target_index)
+                niri_action.action("ConsumeOrExpelWindowRight")
+
+            else:
+                # 4/5, 9/10, 14/15, ...
+                target_id = newest_window_data["id"]
+                expected_col = 2 + 2 * ((num_tile_wins - 1) // TILE_TO_N)
+                actual_col = newest_window_data.get("col_idx")
+                is_new_win_onscreen = actual_col == expected_col
+
+                print(
+                    f"DEBUG - cycle {cycle_pos} target_id={target_id} "
+                    f"actual_col={actual_col} expected_col={expected_col} "
+                    f"is_new_win_onscreen={is_new_win_onscreen}"
+                )
+
+                niri_action.action("FocusWindow", id=target_id)
+
+                consume_action = (
+                    "ConsumeOrExpelWindowRight"
+                    if is_new_win_onscreen
+                    else "ConsumeOrExpelWindowLeft"
+                )
+                niri_action.action(consume_action, id=target_id)
+
+
+            pass
 
 except (KeyboardInterrupt, InterruptedError):
     pass
 
 finally:
-    cmd_server.stop()
     niri_action.close()
     niri_reader.close()
+    cmd_server.stop()
     print("", f"({os.path.basename(__file__)}) - Closed niri IPC connection", sep="\n")
