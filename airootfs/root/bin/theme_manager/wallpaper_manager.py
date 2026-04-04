@@ -3,6 +3,7 @@ import subprocess
 import random
 from typing import Optional, List
 
+
 class WallpaperManager:
     """Manage wallpapers using swww"""
 
@@ -17,7 +18,7 @@ class WallpaperManager:
             return []
 
         # Supported image formats
-        extensions = ['*.jpg', '*.jpeg', '*.png', '*.gif', '*.bmp', '*.webp']
+        extensions = ["*.jpg", "*.jpeg", "*.png", "*.gif", "*.bmp", "*.webp"]
         wallpapers = []
 
         for ext in extensions:
@@ -28,32 +29,30 @@ class WallpaperManager:
         return sorted(wallpapers)
 
     def set_wallpaper(self, image_path: Path, transition: str = "fade") -> bool:
-        """Set wallpaper using swww"""
+        """Set wallpaper using awww"""
         if not image_path.exists():
             print(f"Wallpaper not found: {image_path}")
             return False
 
         try:
             # Check if swww daemon is running
-            result = subprocess.run(
-                ['pgrep', '-x', 'swww-daemon'],
-                capture_output=True
-            )
+            result = subprocess.run(["pgrep", "-x", "awww-daemon"], capture_output=True)
 
             # Start daemon if not running
             if result.returncode != 0:
-                print("Starting swww daemon...")
+                print("Starting awww daemon...")
                 subprocess.Popen(
-                    ['swww-daemon'],
+                    ["awww-daemon"],
                     stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
+                    stderr=subprocess.DEVNULL,
                 )
                 # Give it a moment to start
                 import time
+
                 time.sleep(0.5)
 
             # Set the wallpaper with transition
-            cmd = ['swww', 'img', str(image_path), '--transition-type', transition]
+            cmd = ["awww", "img", str(image_path), "--transition-type", transition]
             result = subprocess.run(cmd, capture_output=True, text=True)
 
             if result.returncode == 0:
@@ -101,5 +100,5 @@ class WallpaperManager:
             "center",
             "any",
             "outer",
-            "random"
+            "random",
         ]
