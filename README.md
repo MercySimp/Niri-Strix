@@ -1,29 +1,118 @@
-Arch Niri Strix
+# Niri-Strix
 
-IN DEV RAMBLINGS
-This is just a pet project that is heavily inspired by omarchy, as omarchy is just a hyprland rice for Arch. So I thought why not do the same for Niri?
-Then came the question of why even ever use this versus any other option? Which comes down to me being gaming.
-Every version I find is heavily inclusive of coding and programing apps, I don't really need those for my use case. I want yay, steam, lutris, wine, retroarch etc.
-So that is where this came to be as I felt since I like my flavor of Arch maybe someone else might to.
+A preconfigured, gaming-focused Arch Linux build running the [Niri](https://github.com/YaLTeR/niri) Wayland compositor. Inspired by [omarchy](https://github.com/basecamp/omarchy), but built around gaming rather than development tooling — think Steam, Lutris, Wine, and RetroArch instead of IDEs and compilers.
 
-Strix uses linux-zen as the kernel, limine as the bootloader, btrfs for file structure, and the skew of packages listed in the package file. There are also some other hard coded values but they might become variables in later versions.
+---
 
-The first step was replication, build an ISO, then to build an install script which I felt would be easiest by passing a json file to archinstall. So that is what is currently being worked on, passing a json to archinstall.
+## What's Inside
 
-This is still under heavily development and I only work on this when not doing my day job so hope to have a functioning version by end of the month but no clue.
+- **Kernel:** linux-zen
+- **Bootloader:** Limine
+- **Filesystem:** btrfs
+- **Compositor:** Niri (Wayland)
+- **Bar:** Waybar
+- **Launcher:** Rofi
+- **AUR Helper:** Paru
+- **Package selection:** Gaming-oriented (Steam, Lutris, Wine, RetroArch, etc.)
 
-The installer script is at 95% as it will currently install the system and not throw any flags moving all the config files from this github to the final live install. The next step is fixing some issues, A.) Archinstall takes the password exactly as it is passed by the installer, which is plaintext making the user unable to log in. Got around by setting the password in chroot and then booting. Other issue was that the boot files weren't created for limine so couldn't boot, fixed by reinstalling linux-zen as chroot. Running more tests, to resolve this before setting as beta version for install.
+Full package lists are available in [`base-packages.txt`](./base-packages.txt) and [`aur-packages.txt`](./aur-packages.txt).
 
-Fixed password issue by sending it prehashed password with yescrypt so whois was added just in case it wasn't installed already. The boot issue I feel probably is related to linux-zen being in my base packages along with being preinstalled by Archinstall so removed it from base packages since see no reason to keep it there on top of the install in chroot.
+---
 
-But yea think it is all working now, about to run a new test with additional configs on top of adding in some bin files that I rebuilt from omarchy. Hoping all works.
+## Requirements
 
-Back from vacation and added a bunch of fonts and began some more coding to fix issues. Added a step in post install that removes the xdg-portal-gnome requirement for niri, I don't want all the dependencies that gnome requires and really from my experiences just using luminous.
+- A UEFI-capable machine (x86_64)
+- At least **20 GB** of free disk space recommended
+- An internet connection during install
+- The Niri-Strix ISO (see [Building the ISO](#building-the-iso) below)
 
-Also looking into adding an option for the user to select what graphics drivers they need but also have the program tell what graphics card the user has. So it will do a read of the graphics card and say, "Nvidia card defaulting to X drivers" but still give the user the chance to change it manually if for some reason the program is wrong, or the user just wants other drivers.
+---
 
-Oh also working on the theme manager some more sill. I don't like some of the things the parser is skipping, so have to revamp that.
+## Building the ISO
 
-At this point it is mostly how I want it to be. Probably introduce the coding for the drive encryption since archinstall handles that anyway. Along with working on the theme mapping for rofi and python. But honestly? I am happy. This whole project was a lot of fun and at this point the intentions are getting more personalized. Functionality is there and now just playing.
+The ISO is built using `archiso`. From an existing Arch Linux environment:
 
-I know the installer takes awhile that is because of the post install process, making paru and then installing all the packages from AUR take awhile. OHHHH lets add that, AUR and Pacman additional packages selection so the user can adjust as they see fit. Will work on the ISO once done with the installer as building the iso and testing it takes awhile. Confirmed it worked on an earlier version but haven't tested since.
+```bash
+# Install archiso if not already present
+sudo pacman -S archiso
+
+# Clone the repo
+git clone https://github.com/MercySimp/Niri-Strix.git
+cd Niri-Strix
+
+# Build the ISO (requires root)
+sudo mkarchiso -v -w /tmp/niri-strix-work -o /tmp/niri-strix-out .
+```
+
+The finished `.iso` file will be written to `/tmp/niri-strix-out/`.
+
+---
+
+## Flashing the ISO
+
+Use any tool you prefer to write the ISO to a USB drive. With `dd`:
+
+```bash
+# Replace /dev/sdX with your USB device — double-check with lsblk
+sudo dd if=/tmp/niri-strix-out/niri-strix-*.iso of=/dev/sdX bs=4M status=progress oflag=sync
+```
+
+---
+
+## Installing
+
+1. Boot your machine from the USB drive.
+2. At the live environment prompt, the installer launches automatically. If it does not, run:
+
+```bash
+install-strix
+```
+
+3. The installer will:
+   - Detect your GPU and suggest appropriate graphics drivers (Nvidia, AMD, or Intel). You can confirm the suggestion or override it manually.
+   - Ask for your target disk and partition preferences.
+   - Ask you to set a root/user password securely.
+   - Install the base system via `archinstall` using the bundled JSON config.
+   - Run a post-install script that:
+     - Builds and installs `paru`
+     - Installs all AUR packages from `aur-packages.txt`
+     - Applies Niri configs and dotfiles
+     - Removes the `xdg-desktop-portal-gnome` dependency (replaced with `xdg-desktop-portal-luminous`)
+
+4. When the installer finishes, reboot and remove the USB drive.
+
+> **Note:** The AUR install step takes a while — `paru` has to build several packages from source. This is expected behavior.
+
+---
+
+## Post-Install
+
+After rebooting into your new system:
+
+- Log in with the credentials you set during install.
+- Niri will start automatically as your Wayland compositor.
+- Waybar, Rofi, and your theming configs will be in place.
+- Steam, Lutris, and RetroArch are ready to launch from Rofi or your app menu.
+
+---
+
+## Theming
+
+Niri-Strix includes a theme manager that applies consistent color schemes across the desktop. Supported targets currently include Niri itself and Rofi. Additional theme mapping for more apps is ongoing.
+
+---
+
+## Known Issues
+
+- Install time is longer than a standard Arch install due to AUR package compilation.
+- Some edge cases may exist with GPU driver detection — if the suggested driver is wrong, select manually when prompted.
+
+---
+
+## In Development
+
+> These features are being actively tested and are **not yet part of a stable release**.
+
+- **Quickshell bar:** Evaluating [Quickshell](https://quickshell.outfoxxed.me/) as a replacement for Waybar. Quickshell offers a more flexible, QML-based configuration model and is being tested as the primary status bar going forward. Waybar remains the default until this is considered stable.
+- **Drive encryption:** Integrating LUKS encryption via archinstall's native encryption support.
+- **User-selectable package sets:** Allowing the user to opt in/out of specific AUR and pacman packages during install rather than always installing the full list.
