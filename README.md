@@ -13,7 +13,7 @@ A preconfigured, gaming-focused Arch Linux build running the [Niri](https://gith
 - **Bar:** Waybar
 - **Launcher:** Rofi
 - **AUR Helper:** Paru
-- **Package selection:** Gaming-oriented (Steam, Lutris, Wine, RetroArch, etc.)
+- **Package selection:** Random Mess of things
 
 Full package lists are available in [`base-packages.txt`](./base-packages.txt) and [`aur-packages.txt`](./aur-packages.txt).
 
@@ -59,6 +59,18 @@ sudo dd if=/tmp/niri-strix-out/niri-strix-*.iso of=/dev/sdX bs=4M status=progres
 
 ---
 
+## Build from Git
+
+If you don't want to build it from a USB you don't have to, if you are already running arch and have 2 hard drives. Just run the installer from your desktop.
+
+```bash
+git clone https://github.com/MercySimp/Niri-Strix.git
+cd Niri-Strix
+sudo airootfs/usr/local/bin/strix-installer.sh
+```
+
+---
+
 ## Installing
 
 1. Boot your machine from the USB drive.
@@ -69,9 +81,9 @@ install-strix
 ```
 
 3. The installer will:
-   - Detect your GPU and suggest appropriate graphics drivers (Nvidia, AMD, or Intel). You can confirm the suggestion or override it manually.
+   - Detect your GPU and suggest appropriate graphics drivers.
    - Ask for your target disk and partition preferences.
-   - Ask you to set a root/user password securely.
+   - Ask you to set a root/user.
    - Install the base system via `archinstall` using the bundled JSON config.
    - Run a post-install script that:
      - Builds and installs `paru`
@@ -81,31 +93,15 @@ install-strix
 
 4. When the installer finishes, reboot and remove the USB drive.
 
-> **Note:** The AUR install step takes a while — `paru` has to build several packages from source. This is expected behavior.
-
----
-
-## Post-Install
-
-After rebooting into your new system:
-
-- Log in with the credentials you set during install.
-- Niri will start automatically as your Wayland compositor.
-- Waybar, Rofi, and your theming configs will be in place.
-- Steam, Lutris, and RetroArch are ready to launch from Rofi or your app menu.
-
----
-
 ## Theming
 
-Niri-Strix includes a theme manager that applies consistent color schemes across the desktop. Supported targets currently include Niri itself and Rofi. Additional theme mapping for more apps is ongoing.
+Niri-Strix includes a theme manager that applies consistent color schemes across the desktop. They are just some themes I found on Github or on the Rice Reddit. Supported targets currently include Niri, Btop, Kitty, Nvim, Waybar, Superfile, Rofi, and Dunst.
 
 ---
 
 ## Known Issues
 
-- Install time is longer than a standard Arch install due to AUR package compilation.
-- Some edge cases may exist with GPU driver detection — if the suggested driver is wrong, select manually when prompted.
+- Some fonts missings from the installer.
 
 ---
 
@@ -115,4 +111,3 @@ Niri-Strix includes a theme manager that applies consistent color schemes across
 
 - **Quickshell bar:** Evaluating [Quickshell](https://quickshell.outfoxxed.me/) as a replacement for Waybar. Quickshell offers a more flexible, QML-based configuration model and is being tested as the primary status bar going forward. Waybar remains the default until this is considered stable.
 - **Drive encryption:** Integrating LUKS encryption via archinstall's native encryption support.
-- **User-selectable package sets:** Allowing the user to opt in/out of specific AUR and pacman packages during install rather than always installing the full list.
