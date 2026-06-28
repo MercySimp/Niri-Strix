@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Deck Shell
+Exec=deck-shell
+Comment=Controller-first Deck gaming shell
+Categories=Game;
