@@ -50,7 +50,17 @@ QStringList SteamLibraryModel::findLibraryRoots()
     if (base.isEmpty()) return {};
 
     QStringList roots;
-    roots << base + "/steamapps";   // default library is always present
+
+    auto addRoot = [&](const QString &path) {
+        QDir d(path);
+        QString canon = d.canonicalPath();
+        if (canon.isEmpty()) canon = d.absolutePath();
+        if (!roots.contains(canon))
+            roots << canon;
+    };
+
+    // Default library is always present
+    addRoot(base + "/steamapps");
 
     QString vdfPath = base + "/steamapps/libraryfolders.vdf";
     QFile f(vdfPath);
@@ -64,22 +74,16 @@ QStringList SteamLibraryModel::findLibraryRoots()
     QRegularExpression pathRe(R"rx(^\s*"path"\s+"([^"]+)")rx");
     for (const QString &line : lines) {
         auto m = pathRe.match(line);
-        if (m.hasMatch()) {
-            QString candidate = m.captured(1) + "/steamapps";
-            if (QDir(candidate).exists() && !roots.contains(candidate))
-                roots << candidate;
-        }
+        if (m.hasMatch())
+            addRoot(m.captured(1) + "/steamapps");
     }
 
     // VDF v1 legacy:  "1"  "/some/path"
     QRegularExpression legacyRe(R"rx(^\s*"[0-9]+"\s+"(/[^"]+)")rx");
     for (const QString &line : lines) {
         auto m = legacyRe.match(line);
-        if (m.hasMatch()) {
-            QString candidate = m.captured(1) + "/steamapps";
-            if (QDir(candidate).exists() && !roots.contains(candidate))
-                roots << candidate;
-        }
+        if (m.hasMatch())
+            addRoot(m.captured(1) + "/steamapps");
     }
 
     return roots;
