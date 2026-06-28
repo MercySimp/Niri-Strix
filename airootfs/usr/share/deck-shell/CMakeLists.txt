@@ -7,8 +7,11 @@ set(CMAKE_AUTOMOC ON)
 find_package(Qt6 REQUIRED COMPONENTS Quick Qml)
 find_package(SDL2 REQUIRED)
 
+# GamepadHandler.h must be listed as a source so AUTOMOC processes
+# its Q_OBJECT macro and generates the signal/slot implementations.
 add_executable(deck-shell
     src/main.cpp
+    src/GamepadHandler.h
 )
 
 target_include_directories(deck-shell PRIVATE src)
