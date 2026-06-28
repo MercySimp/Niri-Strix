@@ -2,23 +2,27 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include "GamepadHandler.h"
+#include "SteamLibrary.h"
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
     QGuiApplication app(argc, argv);
     app.setApplicationName("DeckShell");
     app.setOrganizationName("NiriStrix");
 
-    GamepadHandler gamepad;
-
     QQmlApplicationEngine engine;
-    // Expose SDL2 gamepad handler to QML as "Gamepad"
+
+    // SDL2 controller backend — signals emitted into QML as "Gamepad"
+    GamepadHandler gamepad;
     engine.rootContext()->setContextProperty("Gamepad", &gamepad);
 
-    const QUrl qmlMain(QStringLiteral("/usr/share/deck-shell/main.qml"));
-    engine.load(qmlMain);
+    // Steam library model — exposed to QML as "SteamLibrary"
+    SteamLibraryModel steamLibrary;
+    engine.rootContext()->setContextProperty("SteamLibrary", &steamLibrary);
 
-    if (engine.rootObjects().isEmpty())
-        return -1;
+    const QUrl qmlMain(QStringLiteral("file:///usr/share/deck-shell/main.qml"));
+    engine.load(qmlMain);
+    if (engine.rootObjects().isEmpty()) return -1;
 
     return app.exec();
 }
