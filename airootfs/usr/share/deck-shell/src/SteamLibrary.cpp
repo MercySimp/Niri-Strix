@@ -10,13 +10,10 @@
 #include <QDebug>
 #include <algorithm>
 
-// ────────────────────────────────────────────────────────────────────────────
-// Tiny VDF key→value extractor  (handles both libraryfolders.vdf and .acf)
-// Format:  "key"   "value"  (tab-separated, or any whitespace)
-// ────────────────────────────────────────────────────────────────────────────
+// ── Tiny VDF key→value extractor ─────────────────────────────────────────────
+// Matches:  "key"   "value"  (any whitespace between tokens)
 static QString vdfValue(const QStringList &lines, const QString &key)
 {
-    // Match:  "key"\s+"value"
     QRegularExpression re(
         QStringLiteral("^\\s*\"") + QRegularExpression::escape(key) +
         QStringLiteral("\"\\s+\"([^\"]*)\""));
@@ -27,34 +24,33 @@ static QString vdfValue(const QStringList &lines, const QString &key)
     return {};
 }
 
-// ── Locate Steam base directory (~/.steam/steam or ~/.local/share/Steam) ────
+// ── Locate Steam base directory ───────────────────────────────────────────────
 QString SteamLibraryModel::steamBasePath()
 {
-    // Canonical symlink created by steam on every Linux install
     QString sym = QDir::homePath() + "/.steam/steam";
     if (QDir(sym).exists()) return sym;
 
     QString xdg = QDir::homePath() + "/.local/share/Steam";
     if (QDir(xdg).exists()) return xdg;
 
-    // Flatpak path
+    // Flatpak install
     QString flat = QDir::homePath() + "/.var/app/com.valvesoftware.Steam/data/Steam";
     if (QDir(flat).exists()) return flat;
 
     return {};
 }
 
-// ── Parse libraryfolders.vdf → list of library root paths ───────────────────
-// VDF v2 format (Steam ≥ 2021):
-//   "1" { "path" "/media/games/SteamLibrary" … "apps" { "570" "…" } }
-// Also handles legacy v1 ("1" "/path").
+// ── Parse libraryfolders.vdf → list of steamapps root paths ──────────────────
+// NOTE: Raw string delimiters use "rx" so that the literal )" inside the
+//       pattern does NOT prematurely close the raw string literal.
+//       R"rx(...)rx"  only terminates on the sequence  )rx"
 QStringList SteamLibraryModel::findLibraryRoots()
 {
     QString base = steamBasePath();
     if (base.isEmpty()) return {};
 
     QStringList roots;
-    roots << base + "/steamapps";  // default library always present
+    roots << base + "/steamapps";   // default library is always present
 
     QString vdfPath = base + "/steamapps/libraryfolders.vdf";
     QFile f(vdfPath);
@@ -64,8 +60,8 @@ QStringList SteamLibraryModel::findLibraryRoots()
     QStringList lines;
     while (!in.atEnd()) lines << in.readLine();
 
-    // v2: look for "path" keys inside numbered section blocks
-    QRegularExpression pathRe(R"(^\s*"path"\s+"([^"]+)")");
+    // VDF v2 (Steam >= 2021):  "path"  "/some/path"
+    QRegularExpression pathRe(R"rx(^\s*"path"\s+"([^"]+)")rx");
     for (const QString &line : lines) {
         auto m = pathRe.match(line);
         if (m.hasMatch()) {
@@ -75,8 +71,8 @@ QStringList SteamLibraryModel::findLibraryRoots()
         }
     }
 
-    // v1 legacy: numeric key → path value
-    QRegularExpression legacyRe(R"(^\s*"[0-9]+"\s+"(/[^"]+)")");
+    // VDF v1 legacy:  "1"  "/some/path"
+    QRegularExpression legacyRe(R"rx(^\s*"[0-9]+"\s+"(/[^"]+)")rx");
     for (const QString &line : lines) {
         auto m = legacyRe.match(line);
         if (m.hasMatch()) {
@@ -89,7 +85,7 @@ QStringList SteamLibraryModel::findLibraryRoots()
     return roots;
 }
 
-// ── Parse a single appmanifest_<appid>.acf file ──────────────────────────────
+// ── Parse a single appmanifest_<appid>.acf file ───────────────────────────────
 SteamGame SteamLibraryModel::parseAppManifest(const QString &acfPath)
 {
     QFile f(acfPath);
@@ -108,25 +104,21 @@ SteamGame SteamLibraryModel::parseAppManifest(const QString &acfPath)
     g.sizeOnDisk = sizeStr.isEmpty() ? 0 : sizeStr.toLongLong();
     g.installed  = !g.appId.isEmpty() && !g.name.isEmpty();
 
-    // Steam CDN artwork URLs — no API key required
-    // Portrait cover (library grid view): 600×900
-    g.coverUrl = QStringLiteral("https://cdn.steamstatic.com/steam/apps/%1/library_600x900.jpg")
-                     .arg(g.appId);
-    // Hero / logo for the detail overlay
-    g.logoUrl  = QStringLiteral("https://cdn.steamstatic.com/steam/apps/%1/header.jpg")
-                     .arg(g.appId);
+    // Steam CDN artwork — no API key needed
+    g.coverUrl = QStringLiteral("https://cdn.steamstatic.com/steam/apps/%1/library_600x900.jpg").arg(g.appId);
+    g.logoUrl  = QStringLiteral("https://cdn.steamstatic.com/steam/apps/%1/header.jpg").arg(g.appId);
 
     return g;
 }
 
-// ── Scan one library root for all appmanifest_*.acf files ────────────────────
+// ── Scan one library root for all appmanifest_*.acf files ─────────────────────
 QList<SteamGame> SteamLibraryModel::parseLibraryRoot(const QString &libraryPath)
 {
     QList<SteamGame> games;
     QDir dir(libraryPath);
     if (!dir.exists()) return games;
 
-    QStringList acfFiles = dir.entryList({"appmanifest_*.acf"}, QDir::Files);
+    const QStringList acfFiles = dir.entryList({"appmanifest_*.acf"}, QDir::Files);
     for (const QString &fn : acfFiles) {
         SteamGame g = parseAppManifest(dir.filePath(fn));
         if (g.installed) games << g;
@@ -134,7 +126,7 @@ QList<SteamGame> SteamLibraryModel::parseLibraryRoot(const QString &libraryPath)
     return games;
 }
 
-// ── Model ────────────────────────────────────────────────────────────────────
+// ── Model ─────────────────────────────────────────────────────────────────────
 SteamLibraryModel::SteamLibraryModel(QObject *parent)
     : QAbstractListModel(parent)
 {
@@ -163,7 +155,6 @@ void SteamLibraryModel::refresh()
     for (const QString &root : findLibraryRoots())
         all << parseLibraryRoot(root);
 
-    // Sort alphabetically by name
     std::sort(all.begin(), all.end(), [](const SteamGame &a, const SteamGame &b) {
         return a.name.toLower() < b.name.toLower();
     });
@@ -177,14 +168,11 @@ void SteamLibraryModel::refresh()
 
 void SteamLibraryModel::launchGame(const QString &appId)
 {
-    // steam -applaunch <appid> is the canonical CLI launch method on Linux
-    // It re-uses an already-running Steam instance or starts one.
     QProcess::startDetached("steam", {"-applaunch", appId});
 }
 
 void SteamLibraryModel::installGame(const QString &appId)
 {
-    // Opens the Steam store page via the steam:// URI protocol
     QProcess::startDetached("steam", {QStringLiteral("steam://store/%1").arg(appId)});
 }
 
