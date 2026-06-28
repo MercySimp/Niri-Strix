@@ -1,7 +1,9 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
-import QtGamepad 1.0
+// QtGamepad was dropped from Qt 6. Controller input is handled by the
+// SDL2 GamepadHandler C++ backend injected as context property "Gamepad".
+// Keyboard arrows/Enter/Escape provide the same actions for testing.
 
 ApplicationWindow {
     id: root
@@ -10,187 +12,364 @@ ApplicationWindow {
     height: 1080
     color: "#14161a"
     title: "Deck Shell"
+    flags: Qt.Window
 
-    Gamepad {
-        id: pad
-        deviceId: GamepadManager.connectedGamepads.length > 0 ? GamepadManager.connectedGamepads[0] : -1
-        onButtonAChanged: if (buttonA) focusItem.activate()
-        onButtonBChanged: if (buttonB) stack.pop()
-        onButtonXChanged: if (buttonX) stack.currentItem.openDetails()
-        onButtonYChanged: if (buttonY) stack.currentItem.openSettings()
-        onLeftStickYChanged: navigator.handleAxis(leftStickY)
-        onLeftStickXChanged: navigator.handleAxis(leftStickX)
-        onButtonDownChanged: if (buttonDown) navigator.moveDown()
-        onButtonUpChanged: if (buttonUp) navigator.moveUp()
-        onButtonLeftChanged: if (buttonLeft) navigator.moveLeft()
-        onButtonRightChanged: if (buttonRight) navigator.moveRight()
+    // ── SDL2 controller signals (wired via GamepadHandler C++ backend) ──────
+    Connections {
+        target: Gamepad   // injected by main.cpp via engine.rootContext()
+        ignoreUnknownSignals: true
+        function onButtonA()     { stack.currentItem.activate() }
+        function onButtonB()     { stack.pop() }
+        function onButtonX()     { stack.currentItem.openDetails() }
+        function onButtonY()     { stack.currentItem.openSettings() }
+        function onDpadUp()      { navigator.moveUp() }
+        function onDpadDown()    { navigator.moveDown() }
+        function onDpadLeft()    { navigator.moveLeft() }
+        function onDpadRight()   { navigator.moveRight() }
+        function onAxisLeftY(v)  { navigator.handleAxis(v) }
     }
 
-    // Simple focus manager for controller navigation
+    // ── Keyboard fallback (arrow keys + Enter + Escape) ───────────────────
+    Item {
+        anchors.fill: parent
+        focus: true
+        Keys.onReturnPressed:  stack.currentItem.activate()
+        Keys.onEscapePressed:  stack.pop()
+        Keys.onUpPressed:      navigator.moveUp()
+        Keys.onDownPressed:    navigator.moveDown()
+        Keys.onLeftPressed:    navigator.moveLeft()
+        Keys.onRightPressed:   navigator.moveRight()
+    }
+
+    // ── Focus navigator ───────────────────────────────────────────────────
     QtObject {
         id: navigator
         function handleAxis(v) {
-            if (v > 0.5) moveDown();
-            else if (v < -0.5) moveUp();
+            if      (v >  0.5) moveDown()
+            else if (v < -0.5) moveUp()
         }
-        function moveDown() { FocusScope.moveFocus(Qt.DownFocus); }
-        function moveUp()   { FocusScope.moveFocus(Qt.UpFocus); }
-        function moveLeft() { FocusScope.moveFocus(Qt.LeftFocus); }
-        function moveRight(){ FocusScope.moveFocus(Qt.RightFocus); }
+        function moveUp()    { root.activeFocusItem.nextItemInFocusChain(false).forceActiveFocus() }
+        function moveDown()  { root.activeFocusItem.nextItemInFocusChain(true).forceActiveFocus() }
+        function moveLeft()  { root.activeFocusItem.nextItemInFocusChain(false).forceActiveFocus() }
+        function moveRight() { root.activeFocusItem.nextItemInFocusChain(true).forceActiveFocus() }
     }
 
+    // ── Main page stack ───────────────────────────────────────────────────
     StackView {
         id: stack
         anchors.fill: parent
         initialItem: homePage
     }
 
+    // ── Home ──────────────────────────────────────────────────────────────
     Component {
         id: homePage
         FocusScope {
             anchors.fill: parent
+            focus: true
 
-            Rectangle {
-                anchors.fill: parent
-                color: "#14161a"
-            }
+            Rectangle { anchors.fill: parent; color: "#14161a" }
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 40
-                spacing: 40
+                anchors.margins: 60
+                spacing: 48
 
                 Text {
-                    text: "Deck Mode"
-                    color: "white"
-                    font.pixelSize: 48
+                    text: "\u2665  Deck Mode"
+                    color: "#e8e8e8"
+                    font.pixelSize: 52
+                    font.bold: true
                 }
 
                 RowLayout {
-                    spacing: 24
+                    spacing: 28
+                    Layout.fillWidth: true
 
                     Repeater {
                         model: [
-                            { label: "Library" },
-                            { label: "Store" },
-                            { label: "Downloads" },
-                            { label: "Settings" },
-                            { label: "Power" }
+                            { label: "Library",   icon: "\uD83C\uDFAE" },
+                            { label: "Store",      icon: "\uD83D\uDED2" },
+                            { label: "Downloads",  icon: "\u2B07" },
+                            { label: "Settings",   icon: "\u2699" },
+                            { label: "Power",      icon: "\u23FB" }
                         ]
-                        delegate: Button {
-                            text: modelData.label
-                            Layout.preferredWidth: 260
-                            Layout.preferredHeight: 140
-                            font.pixelSize: 24
+                        delegate: Rectangle {
+                            Layout.preferredWidth: 240
+                            Layout.preferredHeight: 150
+                            color: activeFocus ? "#2a7bd9" : "#1f2531"
+                            radius: 14
+                            border.color: activeFocus ? "#5ba3ff" : "#2e3540"
+                            border.width: activeFocus ? 3 : 1
                             focus: index === 0
+
+                            Behavior on color { ColorAnimation { duration: 120 } }
+
+                            Column {
+                                anchors.centerIn: parent
+                                spacing: 10
+                                Text {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    text: modelData.icon
+                                    font.pixelSize: 36
+                                }
+                                Text {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    text: modelData.label
+                                    color: "white"
+                                    font.pixelSize: 22
+                                    font.bold: activeFocus
+                                }
+                            }
+
                             Keys.onReturnPressed: clicked()
-                            onClicked: {
-                                if (text === "Library") stack.push(libraryPage)
-                                else if (text === "Settings") stack.push(settingsPage)
-                                else if (text === "Power") stack.push(powerPage)
+                            MouseArea { anchors.fill: parent; onClicked: parent.clicked() }
+
+                            function clicked() {
+                                if (modelData.label === "Library")   stack.push(libraryPage)
+                                else if (modelData.label === "Settings") stack.push(settingsPage)
+                                else if (modelData.label === "Power")    stack.push(powerPage)
                             }
                         }
+                    }
+                }
+
+                // Recent / featured area placeholder
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    color: "#1a1e26"
+                    radius: 12
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Recent Games"
+                        color: "#555e6e"
+                        font.pixelSize: 28
                     }
                 }
             }
 
             function activate() {
-                if (FocusScope.focusItem && FocusScope.focusItem.clicked)
-                    FocusScope.focusItem.clicked()
+                var item = root.activeFocusItem
+                if (item && item.clicked) item.clicked()
             }
-
-            function openDetails() {}
+            function openDetails()  {}
             function openSettings() {}
         }
     }
 
+    // ── Library ───────────────────────────────────────────────────────────
     Component {
         id: libraryPage
         FocusScope {
             anchors.fill: parent
+            focus: true
 
             Rectangle { anchors.fill: parent; color: "#14161a" }
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 40
-                spacing: 24
+                anchors.margins: 60
+                spacing: 28
 
-                Text {
-                    text: "Library"
-                    color: "white"
-                    font.pixelSize: 40
+                RowLayout {
+                    Text {
+                        text: "\u25C4"
+                        color: "#5ba3ff"
+                        font.pixelSize: 28
+                        MouseArea { anchors.fill: parent; onClicked: stack.pop() }
+                    }
+                    Text {
+                        text: "Library"
+                        color: "#e8e8e8"
+                        font.pixelSize: 44
+                        font.bold: true
+                    }
                 }
 
                 GridView {
-                    id: grid
+                    id: gameGrid
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    cellWidth: 220
-                    cellHeight: 280
+                    cellWidth: 230
+                    cellHeight: 290
+                    focus: true
+                    clip: true
                     model: 20
-                    delegate: Rectangle {
-                        width: 200
-                        height: 260
-                        color: focus ? "#2a7bd9" : "#1f2329"
-                        radius: 12
-                        border.color: "#3b4048"
-                        focus: index === 0
 
+                    delegate: Rectangle {
+                        width: 210
+                        height: 270
+                        color: GridView.isCurrentItem ? "#2a7bd9" : "#1f2531"
+                        radius: 14
+                        border.color: GridView.isCurrentItem ? "#5ba3ff" : "#2e3540"
+                        border.width: GridView.isCurrentItem ? 3 : 1
+
+                        Behavior on color { ColorAnimation { duration: 120 } }
+
+                        Column {
+                            anchors.fill: parent
+                            anchors.margins: 12
+                            spacing: 8
+
+                            Rectangle {
+                                width: parent.width
+                                height: parent.height * 0.72
+                                color: "#252c38"
+                                radius: 10
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "\uD83C\uDFAE"
+                                    font.pixelSize: 48
+                                }
+                            }
+
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: "Game " + (index + 1)
+                                color: "white"
+                                font.pixelSize: 18
+                                font.bold: GridView.isCurrentItem
+                            }
+                        }
+                    }
+
+                    Keys.onReturnPressed: currentItem.forceActiveFocus()
+                }
+            }
+
+            function activate()     {}
+            function openDetails()  {}
+            function openSettings() {}
+        }
+    }
+
+    // ── Settings ──────────────────────────────────────────────────────────
+    Component {
+        id: settingsPage
+        FocusScope {
+            anchors.fill: parent
+            focus: true
+
+            Rectangle { anchors.fill: parent; color: "#14161a" }
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 60
+                spacing: 28
+
+                RowLayout {
+                    Text { text: "\u25C4"; color: "#5ba3ff"; font.pixelSize: 28
+                        MouseArea { anchors.fill: parent; onClicked: stack.pop() } }
+                    Text { text: "Settings"; color: "#e8e8e8"; font.pixelSize: 44; font.bold: true }
+                }
+
+                Repeater {
+                    model: ["Display", "Audio", "Controller", "Network", "System"]
+                    delegate: Rectangle {
+                        Layout.fillWidth: true
+                        height: 72
+                        color: activeFocus ? "#1f2e42" : "#191d26"
+                        radius: 10
+                        border.color: activeFocus ? "#5ba3ff" : "#2e3540"
+                        focus: index === 0
+                        Behavior on color { ColorAnimation { duration: 120 } }
                         Text {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            anchors.bottom: parent.bottom
-                            anchors.bottomMargin: 16
-                            text: "Game " + (index + 1)
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.left: parent.left
+                            anchors.leftMargin: 28
+                            text: modelData
                             color: "white"
-                            font.pixelSize: 20
+                            font.pixelSize: 24
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.right: parent.right
+                            anchors.rightMargin: 28
+                            text: "\u276F"
+                            color: "#5ba3ff"
+                            font.pixelSize: 22
                         }
                     }
                 }
             }
 
-            function activate() {}
-            function openDetails() {}
+            function activate()     {}
+            function openDetails()  {}
             function openSettings() {}
         }
     }
 
-    Component {
-        id: settingsPage
-        FocusScope {
-            anchors.fill: parent
-            Rectangle { anchors.fill: parent; color: "#14161a" }
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 40
-                spacing: 16
-                Text { text: "Settings"; color: "white"; font.pixelSize: 40 }
-                Text { text: "(Display, audio, controller mappings, network)"; color: "#aaaaaa"; font.pixelSize: 24 }
-            }
-            function activate() {}
-            function openDetails() {}
-            function openSettings() {}
-        }
-    }
-
+    // ── Power ─────────────────────────────────────────────────────────────
     Component {
         id: powerPage
         FocusScope {
             anchors.fill: parent
-            Rectangle { anchors.fill: parent; color: "#14161a" }
+            focus: true
+
+            Rectangle { anchors.fill: parent; color: "#0d0f13"; opacity: 0.97 }
+
             ColumnLayout {
                 anchors.centerIn: parent
-                spacing: 24
-                Text { text: "Power"; color: "white"; font.pixelSize: 40 }
+                spacing: 32
+
+                Text {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: "\u23FB  Power"
+                    color: "#e8e8e8"
+                    font.pixelSize: 44
+                    font.bold: true
+                }
+
                 RowLayout {
-                    spacing: 24
-                    Button { text: "Shutdown" }
-                    Button { text: "Restart" }
-                    Button { text: "Exit Deck Mode"; onClicked: Qt.quit() }
+                    spacing: 28
+
+                    Repeater {
+                        model: [
+                            { label: "Shutdown",     cmd: "systemctl poweroff" },
+                            { label: "Restart",       cmd: "systemctl reboot" },
+                            { label: "Sleep",         cmd: "systemctl suspend" },
+                            { label: "Exit Deck Mode", cmd: "" }
+                        ]
+                        delegate: Rectangle {
+                            width: 220
+                            height: 120
+                            color: activeFocus ? "#c0392b" : "#1f2531"
+                            radius: 14
+                            border.color: activeFocus ? "#e74c3c" : "#2e3540"
+                            border.width: activeFocus ? 3 : 1
+                            focus: index === 0
+                            Behavior on color { ColorAnimation { duration: 120 } }
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: modelData.label
+                                color: "white"
+                                font.pixelSize: 22
+                                font.bold: activeFocus
+                            }
+
+                            Keys.onReturnPressed: doAction()
+                            MouseArea { anchors.fill: parent; onClicked: parent.doAction() }
+
+                            function doAction() {
+                                if (modelData.cmd !== "") Qt.openUrlExternally("exec://" + modelData.cmd)
+                                else Qt.quit()
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: "Press \u241B / B to cancel"
+                    color: "#555e6e"
+                    font.pixelSize: 20
                 }
             }
-            function activate() {}
-            function openDetails() {}
+
+            function activate()     {}
+            function openDetails()  {}
             function openSettings() {}
         }
     }
