@@ -1,0 +1,20 @@
+#!/bin/bash
+
+# Deck Gaming Mode Gamescope session for Niri-Strix
+# This script is intended to be launched by a systemd user service
+# or a login session to provide a Steam Deck-style environment.
+
+set -e
+
+# Optional: give the system a few seconds to settle before toggling VRR overlay behavior
+sleep 10 && gamescopectl adaptive_sync_ignore_overlay 1 &
+
+export STEAM_GAMESCOPE_VRR_SUPPORTED=1
+export STEAM_MULTIPLE_XWAYLANDS=1
+export MANGOHUD=1
+
+# TODO: later replace Steam with a custom launcher binary once implemented
+exec gamescope --mangoapp \
+  -W 1920 -H 1080 -r 60 -f \
+  --xwayland-count 2 \
+  -- steam -steamdeck -steamos3
