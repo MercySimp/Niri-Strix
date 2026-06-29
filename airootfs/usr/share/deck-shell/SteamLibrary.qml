@@ -1,10 +1,11 @@
 // SteamLibrary.qml
 // Singleton model that owns all library state.
-// Installed detection is done CLIENT-SIDE by checking local ACF files
-// via Qt's FileInfo — Steam never has to be running.
+// Installed detection reads ~/.local/share/Steam/steamapps/appmanifest_{appId}.acf
+// directly from disk using Qt's FileInfo — no companion service, no network call.
 
 pragma Singleton
 import QtQuick 2.15
+import Qt.labs.platform 1.1
 
 ListModel {
     id: root
@@ -13,10 +14,10 @@ ListModel {
     property int  filterMode: 0
     property bool loading:    false
 
-    // Full owned list from server (no installed field)
-    property var  _owned: []
+    // Full owned list returned by the remote server
+    property var _owned: []
 
-    // Default Steam steamapps path on Arch
+    // Path to Steam's steamapps directory on the local Arch machine
     readonly property string steamAppsPath:
         StandardPaths.writableLocation(StandardPaths.HomeLocation)
         + "/.local/share/Steam/steamapps/"
@@ -43,68 +44,51 @@ ListModel {
     }
 
     // ---------------------------------------------------------------------------
-    // Private: rebuild the visible list based on filterMode
+    // Check if a game is installed by looking for its appmanifest ACF file.
+    // FileInfo.exists() does a plain stat() call — instant, no network, no service.
     // ---------------------------------------------------------------------------
     function _isInstalled(appId) {
-        // Check for appmanifest_{appId}.acf on local disk.
-        // Qt.resolvedUrl turns the file:// path into something FileInfo can use.
-        var path = steamAppsPath + "appmanifest_" + appId + ".acf"
-        // Use XMLHttpRequest HEAD trick — FileInfo is not available in plain QML
-        // without a C++ plugin, so we use a synchronous XHR to file://
-        var xhr = new XMLHttpRequest()
-        xhr.open("HEAD", "file://" + path, false)   // false = synchronous
-        try { xhr.send() } catch(e) { return false }
-        return xhr.status === 200
+        return FileInfo.exists(steamAppsPath + "appmanifest_" + appId + ".acf")
     }
 
+    // ---------------------------------------------------------------------------
+    // Rebuild the visible list based on filterMode
+    // ---------------------------------------------------------------------------
     function _rebuild() {
         loading = true
         root.clear()
 
         if (filterMode === 0) {
-            // Installed only — scan ACF files directly, no server needed
-            _scanInstalledLocal()
-        } else {
-            // All owned — use server list, annotate with local installed state
+            // Installed only — walk the server's owned list and filter locally.
+            // If owned list is empty (not signed in), show nothing here;
+            // user sees the empty-state prompt to sign in.
             for (var i = 0; i < _owned.length; i++) {
                 var g = _owned[i]
-                root.append({
-                    appId:      g.appId,
-                    name:       g.name,
-                    coverUrl:   g.coverUrl,
-                    installed:  _isInstalled(g.appId),
-                    lastPlayed: g.playtimeForever ? String(g.playtimeForever) : "0"
-                })
-            }
-        }
-
-        loading = false
-    }
-
-    function _scanInstalledLocal() {
-        // Ask the local companion service for installed IDs.
-        // The companion is a tiny localhost:8001 server that runs on the Arch
-        // machine and reads ~/.local/share/Steam/steamapps/appmanifest_*.acf
-        var xhr = new XMLHttpRequest()
-        xhr.open("GET", "http://localhost:8001/installed", true)
-        xhr.onreadystatechange = function() {
-            if (xhr.readyState !== 4) return
-            if (xhr.status === 200) {
-                var data = JSON.parse(xhr.responseText)
-                for (var i = 0; i < data.games.length; i++) {
-                    var g = data.games[i]
+                if (_isInstalled(g.appId)) {
                     root.append({
                         appId:      g.appId,
                         name:       g.name,
                         coverUrl:   g.coverUrl,
                         installed:  true,
-                        lastPlayed: g.lastPlayed || "0"
+                        lastPlayed: g.playtimeForever ? String(g.playtimeForever) : "0"
                     })
                 }
             }
-            loading = false
+        } else {
+            // All Owned — annotate each game with local installed state
+            for (var j = 0; j < _owned.length; j++) {
+                var og = _owned[j]
+                root.append({
+                    appId:      og.appId,
+                    name:       og.name,
+                    coverUrl:   og.coverUrl,
+                    installed:  _isInstalled(og.appId),
+                    lastPlayed: og.playtimeForever ? String(og.playtimeForever) : "0"
+                })
+            }
         }
-        xhr.send()
+
+        loading = false
     }
 
     onFilterModeChanged: _rebuild()
