@@ -33,8 +33,10 @@ ApplicationWindow {
     }
 
     // Called after login completes.
-    // Reads persona/avatar/steamid from the redirect URL, then asks the
-    // C++ SteamLibraryModel to fetch owned games directly from the Steam Web API.
+    // SteamLibraryCtrl is the same C++ object as SteamLibrary but registered
+    // under a second context property name — this avoids a Qt6 bug where
+    // QAbstractListModel objects used as view models get wrapped in a proxy
+    // that shadows Q_INVOKABLE methods.
     function handleLoginDone(urlStr) {
         var persona = getParam(urlStr, "persona")
         var avatar  = getParam(urlStr, "avatar")
@@ -45,11 +47,7 @@ ApplicationWindow {
             steamPersona = persona
             steamAvatar  = avatar
             steamId      = sid
-
-            // Tell the C++ model to fetch owned games using this Steam ID.
-            // The STEAM_API_KEY env var must be set on the machine running deck-shell.
-            // If it is not set, only locally installed games will appear.
-            SteamLibrary.fetchOwnedGamesForId(sid)
+            SteamLibraryCtrl.fetchOwnedGamesForId(sid)
         } else {
             pollAuthStatus()
         }
@@ -70,7 +68,7 @@ ApplicationWindow {
                         steamPersona = data.persona  || ""
                         steamAvatar  = data.avatar   || ""
                         steamId      = data.steamId  || ""
-                        SteamLibrary.fetchOwnedGamesForId(steamId)
+                        SteamLibraryCtrl.fetchOwnedGamesForId(steamId)
                     }
                 } catch(e) { console.warn("pollAuthStatus parse error:", e) }
             } else {
@@ -89,13 +87,13 @@ ApplicationWindow {
         steamPersona = ""
         steamAvatar  = ""
         steamId      = ""
-        SteamLibrary.refresh()
+        SteamLibraryCtrl.refresh()
     }
 
     // Poll on startup in case the user was already logged in from a previous session
     Component.onCompleted: pollAuthStatus()
 
-    // ── Controller signals ──────────────────────────────────────────────────
+    // ── Controller signals ────────────────────────────────────────────────────────────────────────
     Connections {
         target: Gamepad
         ignoreUnknownSignals: true
@@ -234,7 +232,7 @@ ApplicationWindow {
                                 anchors.bottom: parent.bottom; width: parent.width; height: 44; color: "#cc14161a"; radius: 10
                                 Text { anchors.centerIn: parent; text: name; color: "white"; font.pixelSize: 13; elide: Text.ElideRight; width: parent.width - 12; horizontalAlignment: Text.AlignHCenter }
                             }
-                            MouseArea { anchors.fill: parent; onClicked: SteamLibrary.launchGame(appId) }
+                            MouseArea { anchors.fill: parent; onClicked: SteamLibraryCtrl.launchGame(appId) }
                         }
                     }
                     Text {
@@ -274,9 +272,9 @@ ApplicationWindow {
                         Text { anchors.centerIn: parent; text: "\u21BA  Refresh"; color: "#8a9bb5"; font.pixelSize: 18 }
                         MouseArea { anchors.fill: parent; onClicked: {
                             if (root.steamId !== "")
-                                SteamLibrary.fetchOwnedGamesForId(root.steamId)
+                                SteamLibraryCtrl.fetchOwnedGamesForId(root.steamId)
                             else
-                                SteamLibrary.refresh()
+                                SteamLibraryCtrl.refresh()
                         }}
                     }
                 }
@@ -346,11 +344,11 @@ ApplicationWindow {
                             width: parent.width - 16; height: 24; radius: 8; color: "#1f2531"; border.color: "#2e3540"
                             Text { anchors.centerIn: parent; text: "Not installed"; color: "#8a9bb5"; font.pixelSize: 13 }
                         }
-                        Keys.onReturnPressed: installed ? SteamLibrary.launchGame(appId) : SteamLibrary.installGame(appId)
+                        Keys.onReturnPressed: installed ? SteamLibraryCtrl.launchGame(appId) : SteamLibraryCtrl.installGame(appId)
                         MouseArea {
                             anchors.fill: parent
                             onClicked: { gameGrid.currentIndex = index; gameGrid.forceActiveFocus() }
-                            onDoubleClicked: installed ? SteamLibrary.launchGame(appId) : SteamLibrary.installGame(appId)
+                            onDoubleClicked: installed ? SteamLibraryCtrl.launchGame(appId) : SteamLibraryCtrl.installGame(appId)
                         }
                     }
                 }
@@ -368,7 +366,7 @@ ApplicationWindow {
                     }
                 }
             }
-            function activate() { if (gameGrid.currentItem) { if (gameGrid.currentItem.installed) SteamLibrary.launchGame(gameGrid.currentItem.appId); else SteamLibrary.installGame(gameGrid.currentItem.appId) } }
+            function activate() { if (gameGrid.currentItem) { if (gameGrid.currentItem.installed) SteamLibraryCtrl.launchGame(gameGrid.currentItem.appId); else SteamLibraryCtrl.installGame(gameGrid.currentItem.appId) } }
             function openDetails()  {}
             function openSettings() {}
         }
