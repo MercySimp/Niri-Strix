@@ -94,6 +94,8 @@ ApplicationWindow {
     Component.onCompleted: pollAuthStatus()
 
     // ── Controller signals ────────────────────────────────────────────────────────────────────────
+    // Qt Connections handler names are "on" + signal name with first letter uppercased.
+    // GamepadHandler signals: lb() → onLb, rb() → onRb  (NOT onLB/onRB)
     Connections {
         target: Gamepad
         ignoreUnknownSignals: true
@@ -106,8 +108,8 @@ ApplicationWindow {
         function onDpadLeft()   { navigator.moveLeft() }
         function onDpadRight()  { navigator.moveRight() }
         function onAxisLeftY(v) { navigator.handleAxis(v) }
-        function onLB() { SteamLibrary.filterMode = 0 }
-        function onRB() { SteamLibrary.filterMode = 1 }
+        function onLb()         { SteamLibrary.filterMode = 0 }
+        function onRb()         { SteamLibrary.filterMode = 1 }
     }
 
     Item {
