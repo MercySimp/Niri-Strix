@@ -1,0 +1,30 @@
+# Caddy reverse proxy config for api.accesshomeserver.uk
+# Place this file at C:\Caddy\Caddyfile
+# Caddy will auto-provision a Let's Encrypt TLS cert for the subdomain.
+
+api.accesshomeserver.uk {
+    reverse_proxy localhost:8000
+
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        -Server
+    }
+
+    # Rate limit: 60 requests/minute per IP (requires caddy-ratelimit module)
+    # If you don't install the module, comment this block out.
+    # rate_limit {
+    #     zone dynamic_zone {
+    #         key {remote_host}
+    #         events 60
+    #         window 1m
+    #     }
+    # }
+
+    log {
+        output file C:\Caddy\logs\access.log
+        format json
+    }
+}
