@@ -13,10 +13,7 @@ ApplicationWindow {
     flags: Qt.Window
 
     // ── Backend base URL ────────────────────────────────────────────────────
-    // Change this to your deployed backend once it's hosted.
-    // In development, run: uvicorn main:app --host 0.0.0.0 --port 8000
-    // inside the backend/ directory.
-    readonly property string backendUrl: "http://localhost:8000"
+    readonly property string backendUrl: "https://api.accesshomeserver.uk"
 
     // ── Auth state ──────────────────────────────────────────────────────────
     property bool   steamLinked:  false
@@ -86,7 +83,6 @@ ApplicationWindow {
         function onDpadLeft()   { navigator.moveLeft() }
         function onDpadRight()  { navigator.moveRight() }
         function onAxisLeftY(v) { navigator.handleAxis(v) }
-        // Bumpers switch library filter
         function onLB() { SteamLibrary.filterMode = 0 }
         function onRB() { SteamLibrary.filterMode = 1 }
     }
@@ -100,7 +96,6 @@ ApplicationWindow {
         Keys.onDownPressed:   navigator.moveDown()
         Keys.onLeftPressed:   { navigator.moveLeft(); SteamLibrary.filterMode = 0 }
         Keys.onRightPressed:  { navigator.moveRight(); SteamLibrary.filterMode = 1 }
-        // Q/E as keyboard bumper stand-ins
         Keys.onPressed: function(ev) {
             if (ev.key === Qt.Key_Q) { SteamLibrary.filterMode = 0; ev.accepted = true }
             else if (ev.key === Qt.Key_E) { SteamLibrary.filterMode = 1; ev.accepted = true }
@@ -143,7 +138,6 @@ ApplicationWindow {
                     spacing: 20
                     Text { text: "\u2665  Deck Mode"; color: "#e8e8e8"; font.pixelSize: 52; font.bold: true }
                     Item { Layout.fillWidth: true }
-                    // Avatar + persona when linked
                     Row {
                         spacing: 12
                         visible: root.steamLinked
@@ -257,7 +251,6 @@ ApplicationWindow {
                     }
                 }
 
-                // ── Bumper tab bar ──────────────────────────────────────────
                 RowLayout {
                     spacing: 0
                     Layout.fillWidth: true
@@ -294,7 +287,6 @@ ApplicationWindow {
                         }
                     }
 
-                    // Warn if not logged in and they try All Owned
                     Text {
                         visible: SteamLibrary.filterMode === 1 && !root.steamLinked
                         text: "\u26A0  Sign in with Steam in Settings to see your full library"
@@ -352,7 +344,6 @@ ApplicationWindow {
                             onDoubleClicked: installed ? SteamLibrary.launchGame(appId) : SteamLibrary.installGame(appId)
                         }
                     }
-                    Keys.onReturnPressed: { if (currentItem) { if (installed) SteamLibrary.launchGame(currentItem.appId); else SteamLibrary.installGame(currentItem.appId) } }
                 }
 
                 Column {
@@ -383,7 +374,6 @@ ApplicationWindow {
             focus: true
             Rectangle { anchors.fill: parent; color: "#14161a" }
 
-            // Full-screen WebEngineView overlay for the Steam login
             WebEngineView {
                 id: loginWebView
                 anchors.fill: parent
@@ -391,11 +381,21 @@ ApplicationWindow {
                 url: "about:blank"
 
                 onUrlChanged: {
-                    // Backend redirects here when login is complete
-                    if (url.toString().includes("/auth/steam/done")) {
+                    // Catch the redirect back from Steam OpenID
+                    var u = url.toString()
+                    if (u.includes("/auth/steam/done") || u.includes("/auth/steam/callback")) {
                         visible = false
                         url = "about:blank"
                         root.pollAuthStatus()
+                    }
+                }
+
+                onLoadingChanged: function(info) {
+                    // If the backend returns an error page, surface it gracefully
+                    if (info.status === WebEngineView.LoadFailedStatus) {
+                        console.warn("Steam login page failed to load:", info.errorString)
+                        loginErrText.visible = true
+                        visible = false
                     }
                 }
             }
@@ -409,6 +409,20 @@ ApplicationWindow {
                 RowLayout {
                     Text { text: "\u25C4"; color: "#5ba3ff"; font.pixelSize: 28; MouseArea { anchors.fill: parent; onClicked: stack.pop() } }
                     Text { text: "Steam Account"; color: "#e8e8e8"; font.pixelSize: 44; font.bold: true }
+                }
+
+                // Error banner — shown if the WebEngine load fails
+                Rectangle {
+                    id: loginErrText
+                    visible: false
+                    Layout.fillWidth: true
+                    height: 56
+                    color: "#2a1a1a"; radius: 10; border.color: "#c0392b"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "\u26A0  Could not reach the login server. Check your network connection."
+                        color: "#e74c3c"; font.pixelSize: 18
+                    }
                 }
 
                 // ── Linked state ─────────────────────────────────────────────
@@ -442,13 +456,12 @@ ApplicationWindow {
                     spacing: 24
 
                     Text {
-                        text: "Connect your Steam account to see your full game library, including games you own but haven't installed yet."
+                        text: "Connect your Steam account to see your full game library."
                         color: "#8a9bb5"; font.pixelSize: 22
                         wrapMode: Text.WordWrap
                         Layout.maximumWidth: 860
                     }
 
-                    // "Sign in with Steam" button — styled after Valve's branding guidelines
                     Rectangle {
                         width: 320; height: 72; radius: 14
                         gradient: Gradient {
@@ -463,7 +476,6 @@ ApplicationWindow {
                         Row {
                             anchors.centerIn: parent
                             spacing: 14
-                            // Steam logo SVG inline
                             Text { text: "\uD83C\uDFAE"; font.pixelSize: 30; anchors.verticalCenter: parent.verticalCenter }
                             Text { text: "Sign in with Steam"; color: "white"; font.pixelSize: 24; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                         }
@@ -472,6 +484,7 @@ ApplicationWindow {
                         MouseArea { anchors.fill: parent; onClicked: parent.openSteamLogin() }
 
                         function openSteamLogin() {
+                            loginErrText.visible = false
                             loginWebView.url = root.backendUrl + "/auth/steam"
                             loginWebView.visible = true
                             loginWebView.forceActiveFocus()
@@ -479,7 +492,7 @@ ApplicationWindow {
                     }
 
                     Text {
-                        text: "Your Steam username and password are entered directly on Steam's website. We never see your credentials."
+                        text: "Your Steam credentials are entered directly on Steam's website. We never see your password."
                         color: "#555e6e"; font.pixelSize: 16
                         wrapMode: Text.WordWrap
                         Layout.maximumWidth: 780
@@ -520,7 +533,7 @@ ApplicationWindow {
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // SETTINGS — now includes Steam Account row
+    // SETTINGS
     // ════════════════════════════════════════════════════════════════════════
     Component {
         id: settingsPage
@@ -536,7 +549,6 @@ ApplicationWindow {
                     Text { text: "Settings"; color: "#e8e8e8"; font.pixelSize: 44; font.bold: true }
                 }
 
-                // Steam Account row (first, most important for library)
                 Rectangle {
                     Layout.fillWidth: true; height: 80
                     color: activeFocus ? "#1f2e42" : "#191d26"; radius: 10
@@ -547,7 +559,6 @@ ApplicationWindow {
                         anchors.fill: parent; anchors.leftMargin: 28; anchors.rightMargin: 28
                         Text { text: "Steam Account"; color: "white"; font.pixelSize: 24 }
                         Item { Layout.fillWidth: true }
-                        // Status badge
                         Rectangle {
                             width: 160; height: 36; radius: 8
                             color: root.steamLinked ? "#1a4a1a" : "#2a1a1a"
@@ -578,7 +589,7 @@ ApplicationWindow {
                     }
                 }
             }
-            function activate()     { var item = root.activeFocusItem; if (item) { var prop = item.Keys; } stack.push(steamAccountPage) }
+            function activate()     { stack.push(steamAccountPage) }
             function openDetails()  {}
             function openSettings() {}
         }
