@@ -4,13 +4,10 @@ Endpoints
 ---------
 GET  /auth/steam          → redirect to Steam OpenID
 GET  /auth/steam/callback → handle OpenID return, store session
-GET  /auth/steam/done     → success page that closes the WebEngineView overlay
+GET  /auth/steam/done     → success page with user data in query params for QML shell
 GET  /auth/status         → {linked, persona, avatar, steamId}
 POST /auth/logout         → clear session
 GET  /library/owned       → {games: [{appId, name, coverUrl, lastPlayed}]}
-                            NOTE: 'installed' field is NOT set here.
-                            The QML shell checks local ACF files on the user's
-                            Arch machine and sets installed state client-side.
 POST /system/power        → {action: shutdown|reboot|suspend}
 """
 
@@ -19,6 +16,7 @@ import re
 import subprocess
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
 import httpx
 from fastapi import FastAPI, Request, HTTPException
@@ -27,8 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 # ---------------------------------------------------------------------------
-# Config — STEAM_DIR is intentionally removed.
-# Installed-game detection happens client-side on the user's Arch machine.
+# Config
 # ---------------------------------------------------------------------------
 SECRET_KEY    = os.environ.get("DECK_SECRET", "change_me_in_production")
 STEAM_API_KEY = os.environ.get("STEAM_API_KEY", "")
@@ -41,11 +38,11 @@ REALM           = BACKEND_URL
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
-app = FastAPI(title="Deck Shell API", version="0.2.0")
+app = FastAPI(title="Deck Shell API", version="0.3.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],          # Arch clients come from varying local IPs
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -55,7 +52,7 @@ app.add_middleware(
     secret_key=SECRET_KEY,
     session_cookie="deck_session",
     max_age=60 * 60 * 24 * 30,   # 30 days
-    https_only=True,             # cookies only over HTTPS (Cloudflare tunnel)
+    https_only=True,
     same_site="lax",
 )
 
@@ -97,7 +94,7 @@ async def fetch_player_summary(steam_id: str) -> dict:
         if players:
             p = players[0]
             return {"persona": p.get("personaname", ""), "avatar": p.get("avatarfull", "")}
-    # Fallback: public community XML (no API key needed)
+    # Fallback: public community XML
     url = f"https://steamcommunity.com/profiles/{steam_id}/?xml=1"
     async with httpx.AsyncClient() as client:
         r = await client.get(url, timeout=10)
@@ -132,7 +129,7 @@ async def auth_steam_begin():
 
 @app.get("/auth/steam/callback")
 async def auth_steam_callback(request: Request):
-    params = dict(request.query_params)
+    params     = dict(request.query_params)
     claimed_id = params.get("openid.claimed_id", "")
     steam_id   = extract_steam_id(claimed_id)
     if not steam_id:
@@ -140,17 +137,39 @@ async def auth_steam_callback(request: Request):
     valid = await verify_openid(params)
     if not valid:
         raise HTTPException(403, "OpenID verification failed")
+
     summary = await fetch_player_summary(steam_id)
+    persona = summary["persona"]
+    avatar  = summary["avatar"]
+
+    # Store in session for /auth/status and /library/owned
     request.session["steam_id"] = steam_id
-    request.session["persona"]  = summary["persona"]
-    request.session["avatar"]   = summary["avatar"]
+    request.session["persona"]  = persona
+    request.session["avatar"]   = avatar
     request.session["linked"]   = True
-    return RedirectResponse(f"{BACKEND_URL}/auth/steam/done")
+
+    # Redirect to /done with user data embedded as query params.
+    # The QML shell reads these directly from the URL so it never needs
+    # to make a separate cookie-authenticated request.
+    done_url = (
+        f"{BACKEND_URL}/auth/steam/done"
+        f"?persona={quote(persona)}"
+        f"&avatar={quote(avatar)}"
+        f"&steamid={steam_id}"
+    )
+    return RedirectResponse(done_url)
 
 
 @app.get("/auth/steam/done", response_class=HTMLResponse)
 async def auth_steam_done(request: Request):
-    persona = request.session.get("persona", "")
+    # persona may come from query params (fresh login) or session (page reload)
+    persona = request.query_params.get("persona") or request.session.get("persona", "")
+    avatar  = request.query_params.get("avatar")  or request.session.get("avatar", "")
+    steamid = request.query_params.get("steamid") or request.session.get("steam_id", "")
+
+    # The shell's onUrlChanged fires as soon as this URL is hit, so the
+    # page content is mostly cosmetic — but we keep it friendly in case
+    # someone lands here in a real browser.
     return HTMLResponse(
         f"<html><body style='background:#14161a;color:white;font-family:sans-serif;"
         f"display:flex;align-items:center;justify-content:center;height:100vh;margin:0'>"
@@ -177,10 +196,6 @@ async def auth_logout(request: Request):
 
 # ---------------------------------------------------------------------------
 # Routes — Library
-#
-# The server returns the owned game list WITHOUT an 'installed' field.
-# The QML shell resolves installed state locally by checking whether
-# ~/.local/share/Steam/steamapps/appmanifest_{appId}.acf exists on disk.
 # ---------------------------------------------------------------------------
 @app.get("/library/owned")
 async def library_owned(request: Request):
@@ -193,29 +208,26 @@ async def library_owned(request: Request):
             for g in owned:
                 app_id = str(g["appid"])
                 games.append({
-                    "appId":      app_id,
-                    "name":       g.get("name", f"App {app_id}"),
-                    "coverUrl":   f"https://cdn.akamai.steamstatic.com/steam/apps/{app_id}/library_600x900.jpg",
+                    "appId":           app_id,
+                    "name":            g.get("name", f"App {app_id}"),
+                    "coverUrl":        f"https://cdn.akamai.steamstatic.com/steam/apps/{app_id}/library_600x900.jpg",
                     "playtimeForever": g.get("playtime_forever", 0),
                 })
             return JSONResponse({"games": games, "source": "api"})
         except Exception:
             pass
 
-    # No API key or request failed — return empty list.
-    # QML will fall back to installed-only mode via local ACF scan.
     return JSONResponse({"games": [], "source": "none"})
 
 
 # ---------------------------------------------------------------------------
 # Routes — System power
-# (runs on the Arch machine via a local companion — see README)
 # ---------------------------------------------------------------------------
 @app.post("/system/power")
 async def system_power(request: Request):
-    body = await request.json()
+    body   = await request.json()
     action = body.get("action", "")
-    cmds = {
+    cmds   = {
         "shutdown": ["systemctl", "poweroff"],
         "reboot":   ["systemctl", "reboot"],
         "suspend":  ["systemctl", "suspend"],
