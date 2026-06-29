@@ -11,7 +11,6 @@ ApplicationWindow {
     title: "Deck Shell"
     flags: Qt.Window
 
-    // ── SDL2 controller signals ──────────────────────────────────────────────
     Connections {
         target: Gamepad
         ignoreUnknownSignals: true
@@ -26,7 +25,6 @@ ApplicationWindow {
         function onAxisLeftY(v) { navigator.handleAxis(v) }
     }
 
-    // ── Keyboard fallback ────────────────────────────────────────────────────
     Item {
         anchors.fill: parent
         focus: true
@@ -50,40 +48,26 @@ ApplicationWindow {
         function moveRight() { root.activeFocusItem.nextItemInFocusChain(true).forceActiveFocus() }
     }
 
-    // ── Page stack ───────────────────────────────────────────────────────────
     StackView {
         id: stack
         anchors.fill: parent
         initialItem: homePage
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    // HOME
-    // ════════════════════════════════════════════════════════════════════════
     Component {
         id: homePage
         FocusScope {
             anchors.fill: parent
             focus: true
-
             Rectangle { anchors.fill: parent; color: "#14161a" }
-
             ColumnLayout {
                 anchors.fill: parent
                 anchors.margins: 60
                 spacing: 48
-
-                Text {
-                    text: "\u2665  Deck Mode"
-                    color: "#e8e8e8"
-                    font.pixelSize: 52
-                    font.bold: true
-                }
-
+                Text { text: "\u2665  Deck Mode"; color: "#e8e8e8"; font.pixelSize: 52; font.bold: true }
                 RowLayout {
                     spacing: 28
                     Layout.fillWidth: true
-
                     Repeater {
                         model: [
                             { label: "Library",    icon: "\uD83C\uDFAE" },
@@ -101,17 +85,14 @@ ApplicationWindow {
                             border.width: activeFocus ? 3 : 1
                             focus: index === 0
                             Behavior on color { ColorAnimation { duration: 120 } }
-
                             Column {
                                 anchors.centerIn: parent
                                 spacing: 10
                                 Text { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.icon; font.pixelSize: 36 }
                                 Text { anchors.horizontalCenter: parent.horizontalCenter; text: modelData.label; color: "white"; font.pixelSize: 22; font.bold: activeFocus }
                             }
-
                             Keys.onReturnPressed: doNav()
                             MouseArea { anchors.fill: parent; onClicked: parent.doNav() }
-
                             function doNav() {
                                 if      (modelData.label === "Library")  stack.push(libraryPage)
                                 else if (modelData.label === "Store")    stack.push(storePage)
@@ -121,15 +102,11 @@ ApplicationWindow {
                         }
                     }
                 }
-
-                // ── Recent games row (last 5 played, from SteamLibrary model) ──
                 ColumnLayout {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     spacing: 16
-
                     Text { text: "Recently Played"; color: "#8a9bb5"; font.pixelSize: 24; font.bold: true }
-
                     ListView {
                         id: recentList
                         Layout.fillWidth: true
@@ -137,10 +114,7 @@ ApplicationWindow {
                         orientation: ListView.Horizontal
                         spacing: 20
                         clip: true
-
-                        // Sort by lastPlayed desc, take first 5
                         model: SteamLibrary
-
                         delegate: Rectangle {
                             visible: lastPlayed !== "" && lastPlayed !== "0"
                             width: visible ? 160 : 0
@@ -148,40 +122,18 @@ ApplicationWindow {
                             color: "#1a2030"
                             radius: 10
                             clip: true
-
-                            Image {
-                                anchors.fill: parent
-                                source: coverUrl
-                                fillMode: Image.PreserveAspectCrop
-                                layer.enabled: true
-                                layer.effect: null
-                            }
-
+                            Image { anchors.fill: parent; source: coverUrl; fillMode: Image.PreserveAspectCrop }
                             Rectangle {
                                 anchors.bottom: parent.bottom
                                 width: parent.width
                                 height: 44
                                 color: "#cc14161a"
                                 radius: 10
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: name
-                                    color: "white"
-                                    font.pixelSize: 13
-                                    elide: Text.ElideRight
-                                    width: parent.width - 12
-                                    horizontalAlignment: Text.AlignHCenter
-                                }
+                                Text { anchors.centerIn: parent; text: name; color: "white"; font.pixelSize: 13; elide: Text.ElideRight; width: parent.width - 12; horizontalAlignment: Text.AlignHCenter }
                             }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: SteamLibrary.launchGame(appId)
-                            }
+                            MouseArea { anchors.fill: parent; onClicked: SteamLibrary.launchGame(appId) }
                         }
                     }
-
-                    // Empty state when no recent games
                     Text {
                         visible: recentList.count === 0 || SteamLibrary.loading
                         text: SteamLibrary.loading ? "Loading library\u2026" : "No recent games — head to Library to play something!"
@@ -191,82 +143,60 @@ ApplicationWindow {
                     }
                 }
             }
-
             function activate()     { var item = root.activeFocusItem; if (item && item.doNav) item.doNav() }
             function openDetails()  {}
             function openSettings() { stack.push(settingsPage) }
         }
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    // LIBRARY — full game grid with real Steam data
-    // ════════════════════════════════════════════════════════════════════════
     Component {
         id: libraryPage
         FocusScope {
             anchors.fill: parent
             focus: true
-
             Rectangle { anchors.fill: parent; color: "#14161a" }
-
             ColumnLayout {
                 anchors.fill: parent
                 anchors.margins: 48
-                spacing: 24
+                spacing: 20
 
-                // ── Header ──────────────────────────────────────────────────
                 RowLayout {
                     spacing: 20
-                    Text {
-                        text: "\u25C4"
-                        color: "#5ba3ff"
-                        font.pixelSize: 28
-                        MouseArea { anchors.fill: parent; onClicked: stack.pop() }
-                    }
+                    Text { text: "\u25C4"; color: "#5ba3ff"; font.pixelSize: 28; MouseArea { anchors.fill: parent; onClicked: stack.pop() } }
                     Text { text: "Library"; color: "#e8e8e8"; font.pixelSize: 44; font.bold: true }
-                    Text {
-                        text: SteamLibrary.count + " games"
-                        color: "#8a9bb5"
-                        font.pixelSize: 22
-                        Layout.alignment: Qt.AlignVCenter
-                    }
                     Item { Layout.fillWidth: true }
-                    // Refresh button
-                    Rectangle {
-                        width: 120; height: 44
-                        color: "#1f2531"; radius: 10
-                        border.color: "#2e3540"
-                        Text { anchors.centerIn: parent; text: "\u21BA  Refresh"; color: "#8a9bb5"; font.pixelSize: 18 }
-                        MouseArea { anchors.fill: parent; onClicked: SteamLibrary.refresh() }
+                    Text { text: SteamLibrary.count + " games"; color: "#8a9bb5"; font.pixelSize: 22; Layout.alignment: Qt.AlignVCenter }
+                    Rectangle { width: 120; height: 44; color: "#1f2531"; radius: 10; border.color: "#2e3540"; Text { anchors.centerIn: parent; text: "\u21BA  Refresh"; color: "#8a9bb5"; font.pixelSize: 18 }; MouseArea { anchors.fill: parent; onClicked: SteamLibrary.refresh() } }
+                }
+
+                RowLayout {
+                    spacing: 16
+                    Layout.fillWidth: true
+                    Text { text: "LB: Installed"; color: "#8a9bb5"; font.pixelSize: 18 }
+                    Text { text: "RB: All Owned"; color: "#8a9bb5"; font.pixelSize: 18 }
+                }
+
+                Item {
+                    anchors.fill: parent
+                    Keys.onPressed: function(ev) {
+                        if (ev.key === Qt.Key_Q) {
+                            SteamLibrary.filterMode = 0; // InstalledOnly
+                            ev.accepted = true;
+                        } else if (ev.key === Qt.Key_E) {
+                            SteamLibrary.filterMode = 1; // AllOwned
+                            ev.accepted = true;
+                        }
                     }
                 }
 
-                // ── Loading indicator ────────────────────────────────────────
                 Text {
                     visible: SteamLibrary.loading
-                    text: "Scanning Steam library\u2026"
+                    text: "Fetching Steam library\u2026"
                     color: "#8a9bb5"
-                    font.pixelSize: 26
+                    font.pixelSize: 24
                     Layout.alignment: Qt.AlignHCenter
                 }
 
-                // ── Empty state ──────────────────────────────────────────────
-                Column {
-                    visible: !SteamLibrary.loading && SteamLibrary.count === 0
-                    Layout.alignment: Qt.AlignHCenter
-                    spacing: 16
-                    Text { text: "\uD83C\uDFAE"; font.pixelSize: 64; anchors.horizontalCenter: parent.horizontalCenter }
-                    Text { text: "No installed games found"; color: "#e8e8e8"; font.pixelSize: 30; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
-                    Text { text: "Make sure Steam is installed and you have games in your library."; color: "#555e6e"; font.pixelSize: 20; anchors.horizontalCenter: parent.horizontalCenter }
-                    Rectangle {
-                        width: 200; height: 54; radius: 12; color: "#2a7bd9"
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        Text { anchors.centerIn: parent; text: "Open Store"; color: "white"; font.pixelSize: 22; font.bold: true }
-                        MouseArea { anchors.fill: parent; onClicked: stack.push(storePage) }
-                    }
-                }
-
-                // ── Game grid ────────────────────────────────────────────────
                 GridView {
                     id: gameGrid
                     visible: !SteamLibrary.loading && SteamLibrary.count > 0
@@ -277,7 +207,6 @@ ApplicationWindow {
                     focus: true
                     clip: true
                     model: SteamLibrary
-
                     delegate: Rectangle {
                         width: 184
                         height: 284
@@ -286,10 +215,7 @@ ApplicationWindow {
                         border.color: GridView.isCurrentItem ? "#5ba3ff" : "#2e3540"
                         border.width: GridView.isCurrentItem ? 3 : 1
                         clip: true
-
                         Behavior on color { ColorAnimation { duration: 120 } }
-
-                        // ── Game cover art from Steam CDN ────────────────────
                         Image {
                             id: coverImg
                             anchors.top: parent.top
@@ -300,61 +226,53 @@ ApplicationWindow {
                             fillMode: Image.PreserveAspectCrop
                             smooth: true
                             asynchronous: true
-
-                            // Fallback while loading / on error
-                            Rectangle {
-                                anchors.fill: parent
-                                color: "#252c38"
-                                visible: coverImg.status !== Image.Ready
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "\uD83C\uDFAE"
-                                    font.pixelSize: 52
-                                }
-                            }
+                            Rectangle { anchors.fill: parent; color: "#252c38"; visible: coverImg.status !== Image.Ready; Text { anchors.centerIn: parent; text: "\uD83C\uDFAE"; font.pixelSize: 52 } }
                         }
-
-                        // ── Name label ───────────────────────────────────────
                         Text {
-                            anchors {
-                                top: coverImg.bottom
-                                left: parent.left
-                                right: parent.right
-                                margins: 8
-                            }
+                            anchors.top: coverImg.bottom
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.margins: 8
                             text: name
-                            color: "white"
+                            color: installed ? "white" : "#b0b8c8"
                             font.pixelSize: 15
                             font.bold: GridView.isCurrentItem
                             elide: Text.ElideRight
                             horizontalAlignment: Text.AlignHCenter
                         }
-
-                        // ── Launch on A / click ──────────────────────────────
-                        Keys.onReturnPressed: SteamLibrary.launchGame(appId)
+                        Rectangle {
+                            visible: !installed
+                            anchors.bottom: parent.bottom
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            width: parent.width - 16
+                            height: 24
+                            radius: 8
+                            color: "#1f2531"
+                            border.color: "#2e3540"
+                            Text { anchors.centerIn: parent; text: "Not installed"; color: "#8a9bb5"; font.pixelSize: 13 }
+                        }
+                        Keys.onReturnPressed: installed ? SteamLibrary.launchGame(appId) : SteamLibrary.installGame(appId)
                         MouseArea {
                             anchors.fill: parent
                             onClicked: { gameGrid.currentIndex = index; gameGrid.forceActiveFocus() }
-                            onDoubleClicked: SteamLibrary.launchGame(appId)
+                            onDoubleClicked: installed ? SteamLibrary.launchGame(appId) : SteamLibrary.installGame(appId)
                         }
                     }
-
-                    Keys.onReturnPressed: SteamLibrary.launchGame(currentItem ? currentItem.appId : "")
                 }
             }
-
             function activate() {
-                if (gameGrid.currentItem)
-                    SteamLibrary.launchGame(gameGrid.model.data(gameGrid.model.index(gameGrid.currentIndex, 0), 257))
+                if (gameGrid.currentItem) {
+                    if (gameGrid.currentItem.installed)
+                        SteamLibrary.launchGame(gameGrid.currentItem.appId)
+                    else
+                        SteamLibrary.installGame(gameGrid.currentItem.appId)
+                }
             }
             function openDetails()  {}
             function openSettings() {}
         }
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    // STORE — opens Steam store via steam:// URI
-    // ════════════════════════════════════════════════════════════════════════
     Component {
         id: storePage
         FocusScope {
@@ -366,23 +284,8 @@ ApplicationWindow {
                 spacing: 28
                 Text { text: "\uD83D\uDED2  Steam Store"; color: "#e8e8e8"; font.pixelSize: 44; font.bold: true; Layout.alignment: Qt.AlignHCenter }
                 Text { text: "Opens Steam's built-in store browser."; color: "#8a9bb5"; font.pixelSize: 22; Layout.alignment: Qt.AlignHCenter }
-                Rectangle {
-                    width: 260; height: 64; radius: 14; color: "#2a7bd9"
-                    Layout.alignment: Qt.AlignHCenter
-                    Text { anchors.centerIn: parent; text: "Open Steam Store"; color: "white"; font.pixelSize: 24; font.bold: true }
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: Qt.openUrlExternally("steam://store")
-                    }
-                    Keys.onReturnPressed: Qt.openUrlExternally("steam://store")
-                    focus: true
-                }
-                Rectangle {
-                    width: 140; height: 48; radius: 10; color: "#1f2531"
-                    Layout.alignment: Qt.AlignHCenter
-                    Text { anchors.centerIn: parent; text: "\u25C4 Back"; color: "#5ba3ff"; font.pixelSize: 20 }
-                    MouseArea { anchors.fill: parent; onClicked: stack.pop() }
-                }
+                Rectangle { width: 260; height: 64; radius: 14; color: "#2a7bd9"; Layout.alignment: Qt.AlignHCenter; Text { anchors.centerIn: parent; text: "Open Steam Store"; color: "white"; font.pixelSize: 24; font.bold: true }; MouseArea { anchors.fill: parent; onClicked: Qt.openUrlExternally("steam://store") }; Keys.onReturnPressed: Qt.openUrlExternally("steam://store"); focus: true }
+                Rectangle { width: 140; height: 48; radius: 10; color: "#1f2531"; Layout.alignment: Qt.AlignHCenter; Text { anchors.centerIn: parent; text: "\u25C4 Back"; color: "#5ba3ff"; font.pixelSize: 20 }; MouseArea { anchors.fill: parent; onClicked: stack.pop() } }
             }
             function activate()     {}
             function openDetails()  {}
@@ -390,9 +293,6 @@ ApplicationWindow {
         }
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    // SETTINGS
-    // ════════════════════════════════════════════════════════════════════════
     Component {
         id: settingsPage
         FocusScope {
@@ -403,21 +303,10 @@ ApplicationWindow {
                 anchors.fill: parent
                 anchors.margins: 60
                 spacing: 28
-                RowLayout {
-                    Text { text: "\u25C4"; color: "#5ba3ff"; font.pixelSize: 28; MouseArea { anchors.fill: parent; onClicked: stack.pop() } }
-                    Text { text: "Settings"; color: "#e8e8e8"; font.pixelSize: 44; font.bold: true }
-                }
+                RowLayout { Text { text: "\u25C4"; color: "#5ba3ff"; font.pixelSize: 28; MouseArea { anchors.fill: parent; onClicked: stack.pop() } }; Text { text: "Settings"; color: "#e8e8e8"; font.pixelSize: 44; font.bold: true } }
                 Repeater {
                     model: ["Display", "Audio", "Controller", "Network", "System"]
-                    delegate: Rectangle {
-                        Layout.fillWidth: true; height: 72
-                        color: activeFocus ? "#1f2e42" : "#191d26"; radius: 10
-                        border.color: activeFocus ? "#5ba3ff" : "#2e3540"
-                        focus: index === 0
-                        Behavior on color { ColorAnimation { duration: 120 } }
-                        Text { anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 28; text: modelData; color: "white"; font.pixelSize: 24 }
-                        Text { anchors.verticalCenter: parent.verticalCenter; anchors.right: parent.right; anchors.rightMargin: 28; text: "\u276F"; color: "#5ba3ff"; font.pixelSize: 22 }
-                    }
+                    delegate: Rectangle { Layout.fillWidth: true; height: 72; color: activeFocus ? "#1f2e42" : "#191d26"; radius: 10; border.color: activeFocus ? "#5ba3ff" : "#2e3540"; focus: index === 0; Behavior on color { ColorAnimation { duration: 120 } }; Text { anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 28; text: modelData; color: "white"; font.pixelSize: 24 }; Text { anchors.verticalCenter: parent.verticalCenter; anchors.right: parent.right; anchors.rightMargin: 28; text: "\u276F"; color: "#5ba3ff"; font.pixelSize: 22 } }
                 }
             }
             function activate()     {}
@@ -426,9 +315,6 @@ ApplicationWindow {
         }
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    // POWER
-    // ════════════════════════════════════════════════════════════════════════
     Component {
         id: powerPage
         FocusScope {
@@ -457,12 +343,7 @@ ApplicationWindow {
                             Text { anchors.centerIn: parent; text: modelData.label; color: "white"; font.pixelSize: 22; font.bold: activeFocus }
                             Keys.onReturnPressed: doAction()
                             MouseArea { anchors.fill: parent; onClicked: parent.doAction() }
-                            function doAction() {
-                                if (modelData.cmd !== "") {
-                                    var p = Qt.createQmlObject('import QtQuick 2.15; QtObject {}', root)
-                                    Qt.openUrlExternally("exec://" + modelData.cmd)
-                                } else Qt.quit()
-                            }
+                            function doAction() { if (modelData.cmd !== "") Qt.openUrlExternally("exec://" + modelData.cmd); else Qt.quit() }
                         }
                     }
                 }
