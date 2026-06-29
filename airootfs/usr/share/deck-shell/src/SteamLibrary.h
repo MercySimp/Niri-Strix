@@ -4,24 +4,25 @@
 #include <QString>
 #include <QList>
 #include <QProcess>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
 
-// ── Data carrier for one installed game ─────────────────────────────────────
 struct SteamGame {
-    QString appId;       // e.g. "570"
-    QString name;        // e.g. "Dota 2"
-    QString coverUrl;    // Steam CDN portrait cover (600×900)
-    QString logoUrl;     // Steam CDN hero logo
-    bool    installed;   // true = appmanifest present
-    qint64  sizeOnDisk;  // bytes
-    QString lastPlayed;  // unix timestamp string from acf, or ""
+    QString appId;
+    QString name;
+    QString coverUrl;
+    QString logoUrl;
+    bool    installed;
+    qint64  sizeOnDisk;
+    QString lastPlayed;
 };
 
-// ── Qt list model exposed to QML as "SteamLibrary" context property ──────────
 class SteamLibraryModel : public QAbstractListModel
 {
     Q_OBJECT
     Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged)
     Q_PROPERTY(int  count   READ rowCount NOTIFY countChanged)
+    Q_PROPERTY(int  filterMode READ filterMode WRITE setFilterMode NOTIFY filterModeChanged)
 
 public:
     enum Roles {
@@ -34,35 +35,50 @@ public:
         LastPlayedRole
     };
 
+    enum FilterMode {
+        InstalledOnly = 0,
+        AllOwned      = 1
+    };
+    Q_ENUM(FilterMode)
+
     explicit SteamLibraryModel(QObject *parent = nullptr);
 
-    // QAbstractListModel
     int      rowCount(const QModelIndex &parent = {}) const override;
     QVariant data(const QModelIndex &index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
 
     bool loading() const { return m_loading; }
 
-    // Called from QML
+    int  filterMode() const { return m_filterMode; }
+    void setFilterMode(int mode);
+
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void launchGame(const QString &appId);
-    Q_INVOKABLE void installGame(const QString &appId);  // opens store page
+    Q_INVOKABLE void installGame(const QString &appId);
 
 signals:
     void loadingChanged();
     void countChanged();
     void errorOccurred(const QString &message);
+    void filterModeChanged();
+
+private slots:
+    void handleOwnedGamesReply(QNetworkReply *reply);
 
 private:
-    // VDF helpers
     static QStringList  findLibraryRoots();
     static QList<SteamGame> parseLibraryRoot(const QString &libraryPath);
     static SteamGame        parseAppManifest(const QString &acfPath);
     static QString          steamBasePath();
 
-    QList<SteamGame> m_games;
-    bool             m_loading = false;
+    QList<SteamGame> m_gamesLocal;
+    QList<SteamGame> m_gamesMerged;
+    bool             m_loading     = false;
+    int              m_filterMode  = InstalledOnly;
+
+    QNetworkAccessManager m_nam;
 
     void setLoading(bool v);
-    void setGames(QList<SteamGame> games);
+    void setMergedGames(QList<SteamGame> games);
+    void fetchOwnedGames();
 };
