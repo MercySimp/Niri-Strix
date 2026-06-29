@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import QtWebEngine 1.10
 
 ApplicationWindow {
     id: root
@@ -11,6 +12,68 @@ ApplicationWindow {
     title: "Deck Shell"
     flags: Qt.Window
 
+    // ── Backend base URL ────────────────────────────────────────────────────
+    // Change this to your deployed backend once it's hosted.
+    // In development, run: uvicorn main:app --host 0.0.0.0 --port 8000
+    // inside the backend/ directory.
+    readonly property string backendUrl: "http://localhost:8000"
+
+    // ── Auth state ──────────────────────────────────────────────────────────
+    property bool   steamLinked:  false
+    property string steamPersona: ""
+    property string steamAvatar:  ""
+    property string steamId:      ""
+
+    // ── Fetch /auth/status on startup ───────────────────────────────────────
+    Component.onCompleted: pollAuthStatus()
+
+    function pollAuthStatus() {
+        var xhr = new XMLHttpRequest()
+        xhr.open("GET", backendUrl + "/auth/status", true)
+        xhr.withCredentials = true
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== 4) return
+            if (xhr.status === 200) {
+                var data = JSON.parse(xhr.responseText)
+                steamLinked  = data.linked  || false
+                steamPersona = data.persona || ""
+                steamAvatar  = data.avatar  || ""
+                steamId      = data.steamId || ""
+                if (steamLinked) fetchOwnedGames()
+            }
+        }
+        xhr.send()
+    }
+
+    function fetchOwnedGames() {
+        var xhr = new XMLHttpRequest()
+        xhr.open("GET", backendUrl + "/library/owned", true)
+        xhr.withCredentials = true
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== 4) return
+            if (xhr.status === 200) {
+                var data = JSON.parse(xhr.responseText)
+                SteamLibrary.loadOwnedGames(data.games)
+            }
+        }
+        xhr.send()
+    }
+
+    function doLogout() {
+        var xhr = new XMLHttpRequest()
+        xhr.open("POST", backendUrl + "/auth/logout", true)
+        xhr.withCredentials = true
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== 4) return
+            steamLinked  = false
+            steamPersona = ""
+            steamAvatar  = ""
+            steamId      = ""
+        }
+        xhr.send()
+    }
+
+    // ── Controller signals ──────────────────────────────────────────────────
     Connections {
         target: Gamepad
         ignoreUnknownSignals: true
@@ -23,6 +86,9 @@ ApplicationWindow {
         function onDpadLeft()   { navigator.moveLeft() }
         function onDpadRight()  { navigator.moveRight() }
         function onAxisLeftY(v) { navigator.handleAxis(v) }
+        // Bumpers switch library filter
+        function onLB() { SteamLibrary.filterMode = 0 }
+        function onRB() { SteamLibrary.filterMode = 1 }
     }
 
     Item {
@@ -32,8 +98,13 @@ ApplicationWindow {
         Keys.onEscapePressed: stack.pop()
         Keys.onUpPressed:     navigator.moveUp()
         Keys.onDownPressed:   navigator.moveDown()
-        Keys.onLeftPressed:   navigator.moveLeft()
-        Keys.onRightPressed:  navigator.moveRight()
+        Keys.onLeftPressed:   { navigator.moveLeft(); SteamLibrary.filterMode = 0 }
+        Keys.onRightPressed:  { navigator.moveRight(); SteamLibrary.filterMode = 1 }
+        // Q/E as keyboard bumper stand-ins
+        Keys.onPressed: function(ev) {
+            if (ev.key === Qt.Key_Q) { SteamLibrary.filterMode = 0; ev.accepted = true }
+            else if (ev.key === Qt.Key_E) { SteamLibrary.filterMode = 1; ev.accepted = true }
+        }
     }
 
     QtObject {
@@ -54,6 +125,9 @@ ApplicationWindow {
         initialItem: homePage
     }
 
+    // ════════════════════════════════════════════════════════════════════════
+    // HOME
+    // ════════════════════════════════════════════════════════════════════════
     Component {
         id: homePage
         FocusScope {
@@ -64,7 +138,20 @@ ApplicationWindow {
                 anchors.fill: parent
                 anchors.margins: 60
                 spacing: 48
-                Text { text: "\u2665  Deck Mode"; color: "#e8e8e8"; font.pixelSize: 52; font.bold: true }
+
+                RowLayout {
+                    spacing: 20
+                    Text { text: "\u2665  Deck Mode"; color: "#e8e8e8"; font.pixelSize: 52; font.bold: true }
+                    Item { Layout.fillWidth: true }
+                    // Avatar + persona when linked
+                    Row {
+                        spacing: 12
+                        visible: root.steamLinked
+                        Image { source: root.steamAvatar; width: 40; height: 40; fillMode: Image.PreserveAspectCrop; layer.enabled: true }
+                        Text { text: root.steamPersona; color: "#8a9bb5"; font.pixelSize: 22; anchors.verticalCenter: parent.verticalCenter }
+                    }
+                }
+
                 RowLayout {
                     spacing: 28
                     Layout.fillWidth: true
@@ -74,7 +161,7 @@ ApplicationWindow {
                             { label: "Store",       icon: "\uD83D\uDED2" },
                             { label: "Downloads",   icon: "\u2B07" },
                             { label: "Settings",    icon: "\u2699" },
-                            { label: "Power",       icon: "\u23FB" }
+                            { label: "Power",        icon: "\u23FB" }
                         ]
                         delegate: Rectangle {
                             Layout.preferredWidth: 240
@@ -102,6 +189,7 @@ ApplicationWindow {
                         }
                     }
                 }
+
                 ColumnLayout {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -124,11 +212,7 @@ ApplicationWindow {
                             clip: true
                             Image { anchors.fill: parent; source: coverUrl; fillMode: Image.PreserveAspectCrop }
                             Rectangle {
-                                anchors.bottom: parent.bottom
-                                width: parent.width
-                                height: 44
-                                color: "#cc14161a"
-                                radius: 10
+                                anchors.bottom: parent.bottom; width: parent.width; height: 44; color: "#cc14161a"; radius: 10
                                 Text { anchors.centerIn: parent; text: name; color: "white"; font.pixelSize: 13; elide: Text.ElideRight; width: parent.width - 12; horizontalAlignment: Text.AlignHCenter }
                             }
                             MouseArea { anchors.fill: parent; onClicked: SteamLibrary.launchGame(appId) }
@@ -136,10 +220,8 @@ ApplicationWindow {
                     }
                     Text {
                         visible: recentList.count === 0 || SteamLibrary.loading
-                        text: SteamLibrary.loading ? "Loading library\u2026" : "No recent games — head to Library to play something!"
-                        color: "#555e6e"
-                        font.pixelSize: 22
-                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: SteamLibrary.loading ? "Loading library\u2026" : "No recent games \u2014 head to Library to play something!"
+                        color: "#555e6e"; font.pixelSize: 22; anchors.horizontalCenter: parent.horizontalCenter
                     }
                 }
             }
@@ -149,6 +231,9 @@ ApplicationWindow {
         }
     }
 
+    // ════════════════════════════════════════════════════════════════════════
+    // LIBRARY
+    // ════════════════════════════════════════════════════════════════════════
     Component {
         id: libraryPage
         FocusScope {
@@ -166,35 +251,63 @@ ApplicationWindow {
                     Text { text: "Library"; color: "#e8e8e8"; font.pixelSize: 44; font.bold: true }
                     Item { Layout.fillWidth: true }
                     Text { text: SteamLibrary.count + " games"; color: "#8a9bb5"; font.pixelSize: 22; Layout.alignment: Qt.AlignVCenter }
-                    Rectangle { width: 120; height: 44; color: "#1f2531"; radius: 10; border.color: "#2e3540"; Text { anchors.centerIn: parent; text: "\u21BA  Refresh"; color: "#8a9bb5"; font.pixelSize: 18 }; MouseArea { anchors.fill: parent; onClicked: SteamLibrary.refresh() } }
+                    Rectangle { width: 120; height: 44; color: "#1f2531"; radius: 10; border.color: "#2e3540"
+                        Text { anchors.centerIn: parent; text: "\u21BA  Refresh"; color: "#8a9bb5"; font.pixelSize: 18 }
+                        MouseArea { anchors.fill: parent; onClicked: { SteamLibrary.refresh(); root.fetchOwnedGames() } }
+                    }
                 }
 
+                // ── Bumper tab bar ──────────────────────────────────────────
                 RowLayout {
-                    spacing: 16
+                    spacing: 0
                     Layout.fillWidth: true
-                    Text { text: "LB: Installed"; color: "#8a9bb5"; font.pixelSize: 18 }
-                    Text { text: "RB: All Owned"; color: "#8a9bb5"; font.pixelSize: 18 }
-                }
 
-                Item {
-                    anchors.fill: parent
-                    Keys.onPressed: function(ev) {
-                        if (ev.key === Qt.Key_Q) {
-                            SteamLibrary.filterMode = 0; // InstalledOnly
-                            ev.accepted = true;
-                        } else if (ev.key === Qt.Key_E) {
-                            SteamLibrary.filterMode = 1; // AllOwned
-                            ev.accepted = true;
+                    Repeater {
+                        model: ["Installed", "All Owned"]
+                        delegate: Rectangle {
+                            property bool active: (index === SteamLibrary.filterMode)
+                            Layout.preferredWidth: 200
+                            height: 48
+                            color: active ? "#2a7bd9" : "#1f2531"
+                            radius: 10
+                            border.color: active ? "#5ba3ff" : "#2e3540"
+                            Behavior on color { ColorAnimation { duration: 120 } }
+                            Row {
+                                anchors.centerIn: parent
+                                spacing: 8
+                                Text {
+                                    text: index === 0 ? "LB" : "RB"
+                                    color: active ? "white" : "#555e6e"
+                                    font.pixelSize: 14
+                                    font.bold: true
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                Text {
+                                    text: modelData
+                                    color: active ? "white" : "#8a9bb5"
+                                    font.pixelSize: 20
+                                    font.bold: active
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                            }
+                            MouseArea { anchors.fill: parent; onClicked: SteamLibrary.filterMode = index }
                         }
+                    }
+
+                    // Warn if not logged in and they try All Owned
+                    Text {
+                        visible: SteamLibrary.filterMode === 1 && !root.steamLinked
+                        text: "\u26A0  Sign in with Steam in Settings to see your full library"
+                        color: "#da7101"; font.pixelSize: 18
+                        Layout.alignment: Qt.AlignVCenter
+                        Layout.leftMargin: 20
                     }
                 }
 
                 Text {
                     visible: SteamLibrary.loading
                     text: "Fetching Steam library\u2026"
-                    color: "#8a9bb5"
-                    font.pixelSize: 24
-                    Layout.alignment: Qt.AlignHCenter
+                    color: "#8a9bb5"; font.pixelSize: 24; Layout.alignment: Qt.AlignHCenter
                 }
 
                 GridView {
@@ -202,14 +315,11 @@ ApplicationWindow {
                     visible: !SteamLibrary.loading && SteamLibrary.count > 0
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    cellWidth: 200
-                    cellHeight: 300
-                    focus: true
-                    clip: true
+                    cellWidth: 200; cellHeight: 300
+                    focus: true; clip: true
                     model: SteamLibrary
                     delegate: Rectangle {
-                        width: 184
-                        height: 284
+                        width: 184; height: 284
                         color: GridView.isCurrentItem ? "#1e2e45" : "#1a1e28"
                         radius: 12
                         border.color: GridView.isCurrentItem ? "#5ba3ff" : "#2e3540"
@@ -218,37 +328,21 @@ ApplicationWindow {
                         Behavior on color { ColorAnimation { duration: 120 } }
                         Image {
                             id: coverImg
-                            anchors.top: parent.top
-                            anchors.left: parent.left
-                            anchors.right: parent.right
+                            anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
                             height: parent.height * 0.78
-                            source: coverUrl
-                            fillMode: Image.PreserveAspectCrop
-                            smooth: true
-                            asynchronous: true
+                            source: coverUrl; fillMode: Image.PreserveAspectCrop; smooth: true; asynchronous: true
                             Rectangle { anchors.fill: parent; color: "#252c38"; visible: coverImg.status !== Image.Ready; Text { anchors.centerIn: parent; text: "\uD83C\uDFAE"; font.pixelSize: 52 } }
                         }
                         Text {
-                            anchors.top: coverImg.bottom
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.margins: 8
-                            text: name
-                            color: installed ? "white" : "#b0b8c8"
-                            font.pixelSize: 15
-                            font.bold: GridView.isCurrentItem
-                            elide: Text.ElideRight
-                            horizontalAlignment: Text.AlignHCenter
+                            anchors.top: coverImg.bottom; anchors.left: parent.left; anchors.right: parent.right; anchors.margins: 8
+                            text: name; color: installed ? "white" : "#b0b8c8"
+                            font.pixelSize: 15; font.bold: GridView.isCurrentItem
+                            elide: Text.ElideRight; horizontalAlignment: Text.AlignHCenter
                         }
                         Rectangle {
                             visible: !installed
-                            anchors.bottom: parent.bottom
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            width: parent.width - 16
-                            height: 24
-                            radius: 8
-                            color: "#1f2531"
-                            border.color: "#2e3540"
+                            anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter
+                            width: parent.width - 16; height: 24; radius: 8; color: "#1f2531"; border.color: "#2e3540"
                             Text { anchors.centerIn: parent; text: "Not installed"; color: "#8a9bb5"; font.pixelSize: 13 }
                         }
                         Keys.onReturnPressed: installed ? SteamLibrary.launchGame(appId) : SteamLibrary.installGame(appId)
@@ -258,81 +352,257 @@ ApplicationWindow {
                             onDoubleClicked: installed ? SteamLibrary.launchGame(appId) : SteamLibrary.installGame(appId)
                         }
                     }
+                    Keys.onReturnPressed: { if (currentItem) { if (installed) SteamLibrary.launchGame(currentItem.appId); else SteamLibrary.installGame(currentItem.appId) } }
+                }
+
+                Column {
+                    visible: !SteamLibrary.loading && SteamLibrary.count === 0
+                    Layout.alignment: Qt.AlignHCenter
+                    spacing: 16
+                    Text { text: "\uD83C\uDFAE"; font.pixelSize: 64; anchors.horizontalCenter: parent.horizontalCenter }
+                    Text { text: "No games found"; color: "#e8e8e8"; font.pixelSize: 30; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
+                    Text {
+                        text: root.steamLinked ? "Install a game from the Store." : "Sign in with Steam in Settings to see your full library."
+                        color: "#555e6e"; font.pixelSize: 20; anchors.horizontalCenter: parent.horizontalCenter
+                    }
                 }
             }
-            function activate() {
-                if (gameGrid.currentItem) {
-                    if (gameGrid.currentItem.installed)
-                        SteamLibrary.launchGame(gameGrid.currentItem.appId)
-                    else
-                        SteamLibrary.installGame(gameGrid.currentItem.appId)
-                }
-            }
+            function activate() { if (gameGrid.currentItem) { if (gameGrid.currentItem.installed) SteamLibrary.launchGame(gameGrid.currentItem.appId); else SteamLibrary.installGame(gameGrid.currentItem.appId) } }
             function openDetails()  {}
             function openSettings() {}
         }
     }
 
+    // ════════════════════════════════════════════════════════════════════════
+    // STEAM ACCOUNT (OpenID login screen)
+    // ════════════════════════════════════════════════════════════════════════
     Component {
-        id: storePage
+        id: steamAccountPage
         FocusScope {
             anchors.fill: parent
             focus: true
             Rectangle { anchors.fill: parent; color: "#14161a" }
-            ColumnLayout {
-                anchors.centerIn: parent
-                spacing: 28
-                Text { text: "\uD83D\uDED2  Steam Store"; color: "#e8e8e8"; font.pixelSize: 44; font.bold: true; Layout.alignment: Qt.AlignHCenter }
-                Text { text: "Opens Steam's built-in store browser."; color: "#8a9bb5"; font.pixelSize: 22; Layout.alignment: Qt.AlignHCenter }
-                Rectangle { width: 260; height: 64; radius: 14; color: "#2a7bd9"; Layout.alignment: Qt.AlignHCenter; Text { anchors.centerIn: parent; text: "Open Steam Store"; color: "white"; font.pixelSize: 24; font.bold: true }; MouseArea { anchors.fill: parent; onClicked: Qt.openUrlExternally("steam://store") }; Keys.onReturnPressed: Qt.openUrlExternally("steam://store"); focus: true }
-                Rectangle { width: 140; height: 48; radius: 10; color: "#1f2531"; Layout.alignment: Qt.AlignHCenter; Text { anchors.centerIn: parent; text: "\u25C4 Back"; color: "#5ba3ff"; font.pixelSize: 20 }; MouseArea { anchors.fill: parent; onClicked: stack.pop() } }
+
+            // Full-screen WebEngineView overlay for the Steam login
+            WebEngineView {
+                id: loginWebView
+                anchors.fill: parent
+                visible: false
+                url: "about:blank"
+
+                onUrlChanged: {
+                    // Backend redirects here when login is complete
+                    if (url.toString().includes("/auth/steam/done")) {
+                        visible = false
+                        url = "about:blank"
+                        root.pollAuthStatus()
+                    }
+                }
             }
-            function activate()     {}
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 60
+                spacing: 32
+                visible: !loginWebView.visible
+
+                RowLayout {
+                    Text { text: "\u25C4"; color: "#5ba3ff"; font.pixelSize: 28; MouseArea { anchors.fill: parent; onClicked: stack.pop() } }
+                    Text { text: "Steam Account"; color: "#e8e8e8"; font.pixelSize: 44; font.bold: true }
+                }
+
+                // ── Linked state ─────────────────────────────────────────────
+                ColumnLayout {
+                    visible: root.steamLinked
+                    spacing: 20
+                    Row {
+                        spacing: 20
+                        Image { source: root.steamAvatar; width: 80; height: 80; fillMode: Image.PreserveAspectCrop }
+                        Column {
+                            spacing: 6
+                            anchors.verticalCenter: parent.verticalCenter
+                            Text { text: root.steamPersona; color: "#e8e8e8"; font.pixelSize: 32; font.bold: true }
+                            Text { text: "Steam ID: " + root.steamId; color: "#8a9bb5"; font.pixelSize: 18 }
+                        }
+                    }
+                    Rectangle {
+                        width: 220; height: 58; radius: 12; color: activeFocus ? "#c0392b" : "#1f2531"
+                        border.color: activeFocus ? "#e74c3c" : "#2e3540"; border.width: activeFocus ? 3 : 1
+                        focus: root.steamLinked
+                        Behavior on color { ColorAnimation { duration: 120 } }
+                        Text { anchors.centerIn: parent; text: "Sign Out"; color: "white"; font.pixelSize: 22; font.bold: true }
+                        Keys.onReturnPressed: root.doLogout()
+                        MouseArea { anchors.fill: parent; onClicked: root.doLogout() }
+                    }
+                }
+
+                // ── Not linked state ─────────────────────────────────────────
+                ColumnLayout {
+                    visible: !root.steamLinked
+                    spacing: 24
+
+                    Text {
+                        text: "Connect your Steam account to see your full game library, including games you own but haven't installed yet."
+                        color: "#8a9bb5"; font.pixelSize: 22
+                        wrapMode: Text.WordWrap
+                        Layout.maximumWidth: 860
+                    }
+
+                    // "Sign in with Steam" button — styled after Valve's branding guidelines
+                    Rectangle {
+                        width: 320; height: 72; radius: 14
+                        gradient: Gradient {
+                            orientation: Gradient.Horizontal
+                            GradientStop { position: 0.0; color: activeFocus ? "#1a8fc2" : "#1b8fc1" }
+                            GradientStop { position: 1.0; color: activeFocus ? "#1063a0" : "#155e8e" }
+                        }
+                        border.color: activeFocus ? "#5ba3ff" : "#1779a8"; border.width: activeFocus ? 3 : 1
+                        focus: !root.steamLinked
+                        Behavior on border.color { ColorAnimation { duration: 120 } }
+
+                        Row {
+                            anchors.centerIn: parent
+                            spacing: 14
+                            // Steam logo SVG inline
+                            Text { text: "\uD83C\uDFAE"; font.pixelSize: 30; anchors.verticalCenter: parent.verticalCenter }
+                            Text { text: "Sign in with Steam"; color: "white"; font.pixelSize: 24; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                        }
+
+                        Keys.onReturnPressed: openSteamLogin()
+                        MouseArea { anchors.fill: parent; onClicked: parent.openSteamLogin() }
+
+                        function openSteamLogin() {
+                            loginWebView.url = root.backendUrl + "/auth/steam"
+                            loginWebView.visible = true
+                            loginWebView.forceActiveFocus()
+                        }
+                    }
+
+                    Text {
+                        text: "Your Steam username and password are entered directly on Steam's website. We never see your credentials."
+                        color: "#555e6e"; font.pixelSize: 16
+                        wrapMode: Text.WordWrap
+                        Layout.maximumWidth: 780
+                    }
+                }
+            }
+
+            function activate()     { var item = root.activeFocusItem; if (item && item.openSteamLogin) item.openSteamLogin() }
             function openDetails()  {}
             function openSettings() {}
         }
     }
 
+    // ════════════════════════════════════════════════════════════════════════
+    // STORE
+    // ════════════════════════════════════════════════════════════════════════
+    Component {
+        id: storePage
+        FocusScope {
+            anchors.fill: parent; focus: true
+            Rectangle { anchors.fill: parent; color: "#14161a" }
+            ColumnLayout {
+                anchors.centerIn: parent; spacing: 28
+                Text { text: "\uD83D\uDED2  Steam Store"; color: "#e8e8e8"; font.pixelSize: 44; font.bold: true; Layout.alignment: Qt.AlignHCenter }
+                Text { text: "Opens Steam's built-in store browser."; color: "#8a9bb5"; font.pixelSize: 22; Layout.alignment: Qt.AlignHCenter }
+                Rectangle { width: 260; height: 64; radius: 14; color: "#2a7bd9"; Layout.alignment: Qt.AlignHCenter
+                    Text { anchors.centerIn: parent; text: "Open Steam Store"; color: "white"; font.pixelSize: 24; font.bold: true }
+                    MouseArea { anchors.fill: parent; onClicked: Qt.openUrlExternally("steam://store") }
+                    Keys.onReturnPressed: Qt.openUrlExternally("steam://store"); focus: true
+                }
+                Rectangle { width: 140; height: 48; radius: 10; color: "#1f2531"; Layout.alignment: Qt.AlignHCenter
+                    Text { anchors.centerIn: parent; text: "\u25C4 Back"; color: "#5ba3ff"; font.pixelSize: 20 }
+                    MouseArea { anchors.fill: parent; onClicked: stack.pop() }
+                }
+            }
+            function activate() {} function openDetails() {} function openSettings() {}
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // SETTINGS — now includes Steam Account row
+    // ════════════════════════════════════════════════════════════════════════
     Component {
         id: settingsPage
         FocusScope {
-            anchors.fill: parent
-            focus: true
+            anchors.fill: parent; focus: true
             Rectangle { anchors.fill: parent; color: "#14161a" }
             ColumnLayout {
                 anchors.fill: parent
                 anchors.margins: 60
                 spacing: 28
-                RowLayout { Text { text: "\u25C4"; color: "#5ba3ff"; font.pixelSize: 28; MouseArea { anchors.fill: parent; onClicked: stack.pop() } }; Text { text: "Settings"; color: "#e8e8e8"; font.pixelSize: 44; font.bold: true } }
+                RowLayout {
+                    Text { text: "\u25C4"; color: "#5ba3ff"; font.pixelSize: 28; MouseArea { anchors.fill: parent; onClicked: stack.pop() } }
+                    Text { text: "Settings"; color: "#e8e8e8"; font.pixelSize: 44; font.bold: true }
+                }
+
+                // Steam Account row (first, most important for library)
+                Rectangle {
+                    Layout.fillWidth: true; height: 80
+                    color: activeFocus ? "#1f2e42" : "#191d26"; radius: 10
+                    border.color: activeFocus ? "#5ba3ff" : "#2e3540"
+                    focus: true
+                    Behavior on color { ColorAnimation { duration: 120 } }
+                    RowLayout {
+                        anchors.fill: parent; anchors.leftMargin: 28; anchors.rightMargin: 28
+                        Text { text: "Steam Account"; color: "white"; font.pixelSize: 24 }
+                        Item { Layout.fillWidth: true }
+                        // Status badge
+                        Rectangle {
+                            width: 160; height: 36; radius: 8
+                            color: root.steamLinked ? "#1a4a1a" : "#2a1a1a"
+                            border.color: root.steamLinked ? "#4caf50" : "#c0392b"
+                            Text {
+                                anchors.centerIn: parent
+                                text: root.steamLinked ? ("\u2714 " + root.steamPersona) : "Not linked"
+                                color: root.steamLinked ? "#4caf50" : "#c0392b"
+                                font.pixelSize: 16; elide: Text.ElideRight; width: parent.width - 16; horizontalAlignment: Text.AlignHCenter
+                            }
+                        }
+                        Text { text: "\u276F"; color: "#5ba3ff"; font.pixelSize: 22 }
+                    }
+                    Keys.onReturnPressed: stack.push(steamAccountPage)
+                    MouseArea { anchors.fill: parent; onClicked: stack.push(steamAccountPage) }
+                }
+
                 Repeater {
                     model: ["Display", "Audio", "Controller", "Network", "System"]
-                    delegate: Rectangle { Layout.fillWidth: true; height: 72; color: activeFocus ? "#1f2e42" : "#191d26"; radius: 10; border.color: activeFocus ? "#5ba3ff" : "#2e3540"; focus: index === 0; Behavior on color { ColorAnimation { duration: 120 } }; Text { anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 28; text: modelData; color: "white"; font.pixelSize: 24 }; Text { anchors.verticalCenter: parent.verticalCenter; anchors.right: parent.right; anchors.rightMargin: 28; text: "\u276F"; color: "#5ba3ff"; font.pixelSize: 22 } }
+                    delegate: Rectangle {
+                        Layout.fillWidth: true; height: 72
+                        color: activeFocus ? "#1f2e42" : "#191d26"; radius: 10
+                        border.color: activeFocus ? "#5ba3ff" : "#2e3540"
+                        focus: false
+                        Behavior on color { ColorAnimation { duration: 120 } }
+                        Text { anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 28; text: modelData; color: "white"; font.pixelSize: 24 }
+                        Text { anchors.verticalCenter: parent.verticalCenter; anchors.right: parent.right; anchors.rightMargin: 28; text: "\u276F"; color: "#5ba3ff"; font.pixelSize: 22 }
+                    }
                 }
             }
-            function activate()     {}
+            function activate()     { var item = root.activeFocusItem; if (item) { var prop = item.Keys; } stack.push(steamAccountPage) }
             function openDetails()  {}
             function openSettings() {}
         }
     }
 
+    // ════════════════════════════════════════════════════════════════════════
+    // POWER
+    // ════════════════════════════════════════════════════════════════════════
     Component {
         id: powerPage
         FocusScope {
-            anchors.fill: parent
-            focus: true
+            anchors.fill: parent; focus: true
             Rectangle { anchors.fill: parent; color: "#0d0f13"; opacity: 0.97 }
             ColumnLayout {
-                anchors.centerIn: parent
-                spacing: 32
+                anchors.centerIn: parent; spacing: 32
                 Text { Layout.alignment: Qt.AlignHCenter; text: "\u23FB  Power"; color: "#e8e8e8"; font.pixelSize: 44; font.bold: true }
                 RowLayout {
                     spacing: 28
                     Repeater {
                         model: [
-                            { label: "Shutdown",      cmd: "systemctl poweroff" },
-                            { label: "Restart",        cmd: "systemctl reboot"   },
-                            { label: "Sleep",          cmd: "systemctl suspend"  },
-                            { label: "Exit Deck Mode", cmd: ""                   }
+                            { label: "Shutdown",       cmd: "systemctl poweroff" },
+                            { label: "Restart",         cmd: "systemctl reboot"   },
+                            { label: "Sleep",           cmd: "systemctl suspend"  },
+                            { label: "Exit Deck Mode",  cmd: ""                   }
                         ]
                         delegate: Rectangle {
                             width: 220; height: 120
@@ -349,9 +619,7 @@ ApplicationWindow {
                 }
                 Text { Layout.alignment: Qt.AlignHCenter; text: "Press \u241B / B to cancel"; color: "#555e6e"; font.pixelSize: 20 }
             }
-            function activate()     {}
-            function openDetails()  {}
-            function openSettings() {}
+            function activate() {} function openDetails() {} function openSettings() {}
         }
     }
 }
