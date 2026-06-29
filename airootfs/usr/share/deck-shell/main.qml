@@ -12,18 +12,46 @@ ApplicationWindow {
     title: "Deck Shell"
     flags: Qt.Window
 
-    // ── Backend base URL ────────────────────────────────────────────────────
     readonly property string backendUrl: "https://api.accesshomeserver.uk"
 
-    // ── Auth state ──────────────────────────────────────────────────────────
     property bool   steamLinked:  false
     property string steamPersona: ""
     property string steamAvatar:  ""
     property string steamId:      ""
 
-    // ── Fetch /auth/status on startup ───────────────────────────────────────
-    Component.onCompleted: pollAuthStatus()
+    // Parse a single query param from a URL string
+    function getParam(url, key) {
+        var idx = url.indexOf("?")
+        if (idx < 0) return ""
+        var pairs = url.substring(idx + 1).split("&")
+        for (var i = 0; i < pairs.length; i++) {
+            var kv = pairs[i].split("=")
+            if (decodeURIComponent(kv[0]) === key)
+                return kv.length > 1 ? decodeURIComponent(kv[1].replace(/\+/g, " ")) : ""
+        }
+        return ""
+    }
 
+    // Called after login completes — reads user info embedded in the redirect URL
+    // Backend should redirect to: /auth/steam/done?persona=NAME&avatar=URL&steamid=ID
+    function handleLoginDone(urlStr) {
+        var persona = getParam(urlStr, "persona")
+        var avatar  = getParam(urlStr, "avatar")
+        var sid     = getParam(urlStr, "steamid")
+
+        if (persona !== "") {
+            steamLinked  = true
+            steamPersona = persona
+            steamAvatar  = avatar
+            steamId      = sid
+            fetchLibraryViaWebEngine()
+        } else {
+            // Fallback: try XHR with credentials in case cookies do work
+            pollAuthStatus()
+        }
+    }
+
+    // XHR fallback — works if backend sets SameSite=None; Secure cookies
     function pollAuthStatus() {
         var xhr = new XMLHttpRequest()
         xhr.open("GET", backendUrl + "/auth/status", true)
@@ -31,44 +59,68 @@ ApplicationWindow {
         xhr.onreadystatechange = function() {
             if (xhr.readyState !== 4) return
             if (xhr.status === 200) {
-                var data = JSON.parse(xhr.responseText)
-                steamLinked  = data.linked  || false
-                steamPersona = data.persona || ""
-                steamAvatar  = data.avatar  || ""
-                steamId      = data.steamId || ""
-                if (steamLinked) fetchOwnedGames()
+                try {
+                    var data = JSON.parse(xhr.responseText)
+                    if (data.linked) {
+                        steamLinked  = data.linked
+                        steamPersona = data.persona || ""
+                        steamAvatar  = data.avatar  || ""
+                        steamId      = data.steamId || ""
+                        fetchLibraryViaWebEngine()
+                    }
+                } catch(e) { console.warn("pollAuthStatus parse error:", e) }
+            } else {
+                console.warn("pollAuthStatus HTTP", xhr.status)
             }
         }
         xhr.send()
     }
 
-    function fetchOwnedGames() {
-        var xhr = new XMLHttpRequest()
-        xhr.open("GET", backendUrl + "/library/owned", true)
-        xhr.withCredentials = true
-        xhr.onreadystatechange = function() {
-            if (xhr.readyState !== 4) return
-            if (xhr.status === 200) {
-                var data = JSON.parse(xhr.responseText)
-                SteamLibrary.loadOwnedGames(data.games)
-            }
-        }
-        xhr.send()
+    // Load library by navigating a hidden WebEngineView to /library/owned
+    // so the session cookie is sent automatically by the WebEngine cookie store
+    function fetchLibraryViaWebEngine() {
+        libraryFetcher.url = backendUrl + "/library/owned"
     }
 
     function doLogout() {
-        var xhr = new XMLHttpRequest()
-        xhr.open("POST", backendUrl + "/auth/logout", true)
-        xhr.withCredentials = true
-        xhr.onreadystatechange = function() {
-            if (xhr.readyState !== 4) return
-            steamLinked  = false
-            steamPersona = ""
-            steamAvatar  = ""
-            steamId      = ""
-        }
-        xhr.send()
+        logoutFetcher.url = backendUrl + "/auth/logout"
+        steamLinked  = false
+        steamPersona = ""
+        steamAvatar  = ""
+        steamId      = ""
     }
+
+    // ── Hidden WebEngineView for authenticated library fetch ──────────────────────
+    WebEngineView {
+        id: libraryFetcher
+        visible: false
+        width: 1; height: 1
+        url: "about:blank"
+
+        onLoadingChanged: function(info) {
+            if (info.status === WebEngineView.LoadSucceededStatus) {
+                // Extract JSON from page body text
+                runJavaScript("document.body.innerText", function(text) {
+                    if (!text) return
+                    try {
+                        var data = JSON.parse(text)
+                        if (data.games) SteamLibrary.loadOwnedGames(data.games)
+                    } catch(e) { console.warn("Library JSON parse error:", e, text.substring(0,200)) }
+                    url = "about:blank"
+                })
+            }
+        }
+    }
+
+    WebEngineView {
+        id: logoutFetcher
+        visible: false
+        width: 1; height: 1
+        url: "about:blank"
+    }
+
+    // Poll on startup in case the user was already logged in from a previous session
+    Component.onCompleted: pollAuthStatus()
 
     // ── Controller signals ──────────────────────────────────────────────────
     Connections {
@@ -141,7 +193,7 @@ ApplicationWindow {
                     Row {
                         spacing: 12
                         visible: root.steamLinked
-                        Image { source: root.steamAvatar; width: 40; height: 40; fillMode: Image.PreserveAspectCrop; layer.enabled: true }
+                        Image { source: root.steamAvatar; width: 40; height: 40; fillMode: Image.PreserveAspectCrop }
                         Text { text: root.steamPersona; color: "#8a9bb5"; font.pixelSize: 22; anchors.verticalCenter: parent.verticalCenter }
                     }
                 }
@@ -151,11 +203,11 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Repeater {
                         model: [
-                            { label: "Library",    icon: "\uD83C\uDFAE" },
-                            { label: "Store",       icon: "\uD83D\uDED2" },
-                            { label: "Downloads",   icon: "\u2B07" },
-                            { label: "Settings",    icon: "\u2699" },
-                            { label: "Power",        icon: "\u23FB" }
+                            { label: "Library",   icon: "\uD83C\uDFAE" },
+                            { label: "Store",      icon: "\uD83D\uDED2" },
+                            { label: "Downloads",  icon: "\u2B07" },
+                            { label: "Settings",   icon: "\u2699" },
+                            { label: "Power",       icon: "\u23FB" }
                         ]
                         delegate: Rectangle {
                             Layout.preferredWidth: 240
@@ -247,14 +299,13 @@ ApplicationWindow {
                     Text { text: SteamLibrary.count + " games"; color: "#8a9bb5"; font.pixelSize: 22; Layout.alignment: Qt.AlignVCenter }
                     Rectangle { width: 120; height: 44; color: "#1f2531"; radius: 10; border.color: "#2e3540"
                         Text { anchors.centerIn: parent; text: "\u21BA  Refresh"; color: "#8a9bb5"; font.pixelSize: 18 }
-                        MouseArea { anchors.fill: parent; onClicked: { SteamLibrary.refresh(); root.fetchOwnedGames() } }
+                        MouseArea { anchors.fill: parent; onClicked: { SteamLibrary.refresh(); root.fetchLibraryViaWebEngine() } }
                     }
                 }
 
                 RowLayout {
                     spacing: 0
                     Layout.fillWidth: true
-
                     Repeater {
                         model: ["Installed", "All Owned"]
                         delegate: Rectangle {
@@ -266,47 +317,27 @@ ApplicationWindow {
                             border.color: active ? "#5ba3ff" : "#2e3540"
                             Behavior on color { ColorAnimation { duration: 120 } }
                             Row {
-                                anchors.centerIn: parent
-                                spacing: 8
-                                Text {
-                                    text: index === 0 ? "LB" : "RB"
-                                    color: active ? "white" : "#555e6e"
-                                    font.pixelSize: 14
-                                    font.bold: true
-                                    anchors.verticalCenter: parent.verticalCenter
-                                }
-                                Text {
-                                    text: modelData
-                                    color: active ? "white" : "#8a9bb5"
-                                    font.pixelSize: 20
-                                    font.bold: active
-                                    anchors.verticalCenter: parent.verticalCenter
-                                }
+                                anchors.centerIn: parent; spacing: 8
+                                Text { text: index === 0 ? "LB" : "RB"; color: active ? "white" : "#555e6e"; font.pixelSize: 14; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                                Text { text: modelData; color: active ? "white" : "#8a9bb5"; font.pixelSize: 20; font.bold: active; anchors.verticalCenter: parent.verticalCenter }
                             }
                             MouseArea { anchors.fill: parent; onClicked: SteamLibrary.filterMode = index }
                         }
                     }
-
                     Text {
                         visible: SteamLibrary.filterMode === 1 && !root.steamLinked
                         text: "\u26A0  Sign in with Steam in Settings to see your full library"
                         color: "#da7101"; font.pixelSize: 18
-                        Layout.alignment: Qt.AlignVCenter
-                        Layout.leftMargin: 20
+                        Layout.alignment: Qt.AlignVCenter; Layout.leftMargin: 20
                     }
                 }
 
-                Text {
-                    visible: SteamLibrary.loading
-                    text: "Fetching Steam library\u2026"
-                    color: "#8a9bb5"; font.pixelSize: 24; Layout.alignment: Qt.AlignHCenter
-                }
+                Text { visible: SteamLibrary.loading; text: "Fetching Steam library\u2026"; color: "#8a9bb5"; font.pixelSize: 24; Layout.alignment: Qt.AlignHCenter }
 
                 GridView {
                     id: gameGrid
                     visible: !SteamLibrary.loading && SteamLibrary.count > 0
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
+                    Layout.fillWidth: true; Layout.fillHeight: true
                     cellWidth: 200; cellHeight: 300
                     focus: true; clip: true
                     model: SteamLibrary
@@ -348,8 +379,7 @@ ApplicationWindow {
 
                 Column {
                     visible: !SteamLibrary.loading && SteamLibrary.count === 0
-                    Layout.alignment: Qt.AlignHCenter
-                    spacing: 16
+                    Layout.alignment: Qt.AlignHCenter; spacing: 16
                     Text { text: "\uD83C\uDFAE"; font.pixelSize: 64; anchors.horizontalCenter: parent.horizontalCenter }
                     Text { text: "No games found"; color: "#e8e8e8"; font.pixelSize: 30; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
                     Text {
@@ -365,7 +395,7 @@ ApplicationWindow {
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // STEAM ACCOUNT (OpenID login screen)
+    // STEAM ACCOUNT
     // ════════════════════════════════════════════════════════════════════════
     Component {
         id: steamAccountPage
@@ -381,19 +411,18 @@ ApplicationWindow {
                 url: "about:blank"
 
                 onUrlChanged: {
-                    // Catch the redirect back from Steam OpenID
                     var u = url.toString()
+                    // Detect completion — handles both /done and /callback patterns
                     if (u.includes("/auth/steam/done") || u.includes("/auth/steam/callback")) {
                         visible = false
                         url = "about:blank"
-                        root.pollAuthStatus()
+                        root.handleLoginDone(u)
                     }
                 }
 
                 onLoadingChanged: function(info) {
-                    // If the backend returns an error page, surface it gracefully
                     if (info.status === WebEngineView.LoadFailedStatus) {
-                        console.warn("Steam login page failed to load:", info.errorString)
+                        console.warn("Steam login page failed:", info.errorString)
                         loginErrText.visible = true
                         visible = false
                     }
@@ -411,21 +440,14 @@ ApplicationWindow {
                     Text { text: "Steam Account"; color: "#e8e8e8"; font.pixelSize: 44; font.bold: true }
                 }
 
-                // Error banner — shown if the WebEngine load fails
                 Rectangle {
                     id: loginErrText
                     visible: false
-                    Layout.fillWidth: true
-                    height: 56
+                    Layout.fillWidth: true; height: 56
                     color: "#2a1a1a"; radius: 10; border.color: "#c0392b"
-                    Text {
-                        anchors.centerIn: parent
-                        text: "\u26A0  Could not reach the login server. Check your network connection."
-                        color: "#e74c3c"; font.pixelSize: 18
-                    }
+                    Text { anchors.centerIn: parent; text: "\u26A0  Could not reach the login server. Check your network connection."; color: "#e74c3c"; font.pixelSize: 18 }
                 }
 
-                // ── Linked state ─────────────────────────────────────────────
                 ColumnLayout {
                     visible: root.steamLinked
                     spacing: 20
@@ -433,8 +455,7 @@ ApplicationWindow {
                         spacing: 20
                         Image { source: root.steamAvatar; width: 80; height: 80; fillMode: Image.PreserveAspectCrop }
                         Column {
-                            spacing: 6
-                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 6; anchors.verticalCenter: parent.verticalCenter
                             Text { text: root.steamPersona; color: "#e8e8e8"; font.pixelSize: 32; font.bold: true }
                             Text { text: "Steam ID: " + root.steamId; color: "#8a9bb5"; font.pixelSize: 18 }
                         }
@@ -450,18 +471,14 @@ ApplicationWindow {
                     }
                 }
 
-                // ── Not linked state ─────────────────────────────────────────
                 ColumnLayout {
                     visible: !root.steamLinked
                     spacing: 24
-
                     Text {
                         text: "Connect your Steam account to see your full game library."
                         color: "#8a9bb5"; font.pixelSize: 22
-                        wrapMode: Text.WordWrap
-                        Layout.maximumWidth: 860
+                        wrapMode: Text.WordWrap; Layout.maximumWidth: 860
                     }
-
                     Rectangle {
                         width: 320; height: 72; radius: 14
                         gradient: Gradient {
@@ -472,17 +489,13 @@ ApplicationWindow {
                         border.color: activeFocus ? "#5ba3ff" : "#1779a8"; border.width: activeFocus ? 3 : 1
                         focus: !root.steamLinked
                         Behavior on border.color { ColorAnimation { duration: 120 } }
-
                         Row {
-                            anchors.centerIn: parent
-                            spacing: 14
+                            anchors.centerIn: parent; spacing: 14
                             Text { text: "\uD83C\uDFAE"; font.pixelSize: 30; anchors.verticalCenter: parent.verticalCenter }
                             Text { text: "Sign in with Steam"; color: "white"; font.pixelSize: 24; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                         }
-
                         Keys.onReturnPressed: openSteamLogin()
                         MouseArea { anchors.fill: parent; onClicked: parent.openSteamLogin() }
-
                         function openSteamLogin() {
                             loginErrText.visible = false
                             loginWebView.url = root.backendUrl + "/auth/steam"
@@ -490,16 +503,13 @@ ApplicationWindow {
                             loginWebView.forceActiveFocus()
                         }
                     }
-
                     Text {
                         text: "Your Steam credentials are entered directly on Steam's website. We never see your password."
                         color: "#555e6e"; font.pixelSize: 16
-                        wrapMode: Text.WordWrap
-                        Layout.maximumWidth: 780
+                        wrapMode: Text.WordWrap; Layout.maximumWidth: 780
                     }
                 }
             }
-
             function activate()     { var item = root.activeFocusItem; if (item && item.openSteamLogin) item.openSteamLogin() }
             function openDetails()  {}
             function openSettings() {}
@@ -541,14 +551,11 @@ ApplicationWindow {
             anchors.fill: parent; focus: true
             Rectangle { anchors.fill: parent; color: "#14161a" }
             ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 60
-                spacing: 28
+                anchors.fill: parent; anchors.margins: 60; spacing: 28
                 RowLayout {
                     Text { text: "\u25C4"; color: "#5ba3ff"; font.pixelSize: 28; MouseArea { anchors.fill: parent; onClicked: stack.pop() } }
                     Text { text: "Settings"; color: "#e8e8e8"; font.pixelSize: 44; font.bold: true }
                 }
-
                 Rectangle {
                     Layout.fillWidth: true; height: 80
                     color: activeFocus ? "#1f2e42" : "#191d26"; radius: 10
@@ -575,14 +582,12 @@ ApplicationWindow {
                     Keys.onReturnPressed: stack.push(steamAccountPage)
                     MouseArea { anchors.fill: parent; onClicked: stack.push(steamAccountPage) }
                 }
-
                 Repeater {
                     model: ["Display", "Audio", "Controller", "Network", "System"]
                     delegate: Rectangle {
                         Layout.fillWidth: true; height: 72
                         color: activeFocus ? "#1f2e42" : "#191d26"; radius: 10
-                        border.color: activeFocus ? "#5ba3ff" : "#2e3540"
-                        focus: false
+                        border.color: activeFocus ? "#5ba3ff" : "#2e3540"; focus: false
                         Behavior on color { ColorAnimation { duration: 120 } }
                         Text { anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 28; text: modelData; color: "white"; font.pixelSize: 24 }
                         Text { anchors.verticalCenter: parent.verticalCenter; anchors.right: parent.right; anchors.rightMargin: 28; text: "\u276F"; color: "#5ba3ff"; font.pixelSize: 22 }
@@ -610,10 +615,10 @@ ApplicationWindow {
                     spacing: 28
                     Repeater {
                         model: [
-                            { label: "Shutdown",       cmd: "systemctl poweroff" },
-                            { label: "Restart",         cmd: "systemctl reboot"   },
-                            { label: "Sleep",           cmd: "systemctl suspend"  },
-                            { label: "Exit Deck Mode",  cmd: ""                   }
+                            { label: "Shutdown",      cmd: "systemctl poweroff" },
+                            { label: "Restart",        cmd: "systemctl reboot"   },
+                            { label: "Sleep",          cmd: "systemctl suspend"  },
+                            { label: "Exit Deck Mode", cmd: ""                   }
                         ]
                         delegate: Rectangle {
                             width: 220; height: 120
