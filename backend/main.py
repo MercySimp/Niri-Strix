@@ -1,53 +1,69 @@
-"""
-Deck Shell – Steam auth + library backend
+"""Deck Shell backend — FastAPI
 
-Endpoints:
-  GET  /auth/steam           → redirect user to Steam OpenID login
-  GET  /auth/steam/callback  → Steam returns here; verify & issue session
-  GET  /auth/steam/done      → landing page the webview watches for
-  GET  /library/owned        → return owned-games JSON for the linked user
-  GET  /auth/status          → return current link status for a session
-  POST /auth/logout          → clear session
-
-Environment variables (see .env.example):
-  STEAM_API_KEY   – your Steam Web API key
-  BACKEND_HOST    – public HTTPS hostname, e.g. auth.deckos.example.com
-  SECRET_KEY      – random 32+ char string for session signing
+Endpoints
+---------
+GET  /auth/steam          → redirect to Steam OpenID
+GET  /auth/steam/callback → handle OpenID return, store session
+GET  /auth/steam/done     → success page that closes the WebEngineView overlay
+GET  /auth/status         → {linked, persona, avatar, steamId}
+POST /auth/logout         → clear session
+GET  /library/owned       → {games: [{appId, name, installed, coverUrl, lastPlayed}]}
+GET  /library/installed   → installed games only (via Steam VDF)
+POST /system/power        → {action: shutdown|reboot|suspend}
 """
 
 import os
 import re
-import secrets
+import json
+import asyncio
 import hashlib
-import urllib.parse
-from datetime import datetime, timedelta
-from typing import Optional
+import subprocess
+from pathlib import Path
+from typing import Optional, Dict
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from pydantic import BaseModel
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 
-app = FastAPI(title="DeckShell Steam Auth Service")
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+SECRET_KEY      = os.environ.get("DECK_SECRET", "change_me_in_production")
+STEAM_API_KEY   = os.environ.get("STEAM_API_KEY", "")          # optional: richer data
+BACKEND_URL     = os.environ.get("BACKEND_URL", "http://localhost:8000")
+STEAM_DIR       = Path(os.environ.get("STEAM_DIR", Path.home() / ".local/share/Steam"))
 
-# ── Config ────────────────────────────────────────────────────────────────────
-STEAM_OPENID_URL  = "https://steamcommunity.com/openid/login"
-STEAM_OWNED_URL   = "https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/"
-STEAM_CDN         = "https://cdn.steamstatic.com/steam/apps"
+OPENID_ENDPOINT = "https://steamcommunity.com/openid/login"
+RETURN_TO       = f"{BACKEND_URL}/auth/steam/callback"
+REALM           = BACKEND_URL
 
-STEAM_API_KEY     = os.environ["STEAM_API_KEY"]
-BACKEND_HOST      = os.getenv("BACKEND_HOST", "http://localhost:8000")
-SECRET_KEY        = os.environ["SECRET_KEY"]
+# ---------------------------------------------------------------------------
+# App
+# ---------------------------------------------------------------------------
+app = FastAPI(title="Deck Shell API", version="0.1.0")
 
-# In-memory session store: session_token -> {steam_id, persona, avatar, expires}
-_sessions: dict[str, dict] = {}
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:8000", "http://localhost"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SECRET_KEY,
+    session_cookie="deck_session",
+    max_age=60 * 60 * 24 * 30,   # 30 days
+    https_only=False,
+    same_site="lax",
+)
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _new_token() -> str:
-    return secrets.token_hex(32)
-
-def _openid_params(return_to: str, realm: str) -> dict:
+# ---------------------------------------------------------------------------
+# Steam OpenID helpers
+# ---------------------------------------------------------------------------
+def build_openid_params(return_to: str, realm: str) -> dict:
     return {
         "openid.ns":         "http://specs.openid.net/auth/2.0",
         "openid.mode":       "checkid_setup",
@@ -57,145 +73,228 @@ def _openid_params(return_to: str, realm: str) -> dict:
         "openid.claimed_id": "http://specs.openid.net/auth/2.0/identifier_select",
     }
 
-async def _verify_openid(params: dict) -> Optional[str]:
-    """Verify the OpenID assertion and return SteamID64 string, or None on failure."""
-    check_params = dict(params)
-    check_params["openid.mode"] = "check_authentication"
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(STEAM_OPENID_URL, data=check_params)
-    if "is_valid:true" not in resp.text:
-        return None
-    claimed = params.get("openid.claimed_id", "")
-    m = re.search(r"https://steamcommunity\.com/openid/id/(\d+)", claimed)
+
+def extract_steam_id(claimed_id: str) -> Optional[str]:
+    """Parse SteamID64 from claimed_id URL."""
+    m = re.search(r"steamcommunity\.com/openid/id/(\d+)", claimed_id or "")
     return m.group(1) if m else None
 
-async def _fetch_persona(steam_id: str) -> tuple[str, str]:
-    """Return (persona_name, avatar_url) for a SteamID64."""
+
+async def verify_openid(params: dict) -> bool:
+    """Verify the OpenID assertion with Steam."""
+    check_params = {**params, "openid.mode": "check_authentication"}
+    async with httpx.AsyncClient() as client:
+        r = await client.post(OPENID_ENDPOINT, data=check_params, timeout=10)
+    return "is_valid:true" in r.text
+
+
+async def fetch_player_summary(steam_id: str) -> dict:
+    """Fetch persona name + avatar from Steam Web API or community XML."""
+    if STEAM_API_KEY:
+        url = (
+            f"https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/"
+            f"?key={STEAM_API_KEY}&steamids={steam_id}"
+        )
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, timeout=10)
+        players = r.json().get("response", {}).get("players", [])
+        if players:
+            p = players[0]
+            return {"persona": p.get("personaname", ""), "avatar": p.get("avatarfull", "")}
+    # Fallback: community XML endpoint (no API key required)
+    url = f"https://steamcommunity.com/profiles/{steam_id}/?xml=1"
+    async with httpx.AsyncClient() as client:
+        r = await client.get(url, timeout=10)
+    persona = re.search(r"<steamID><!\[CDATA\[(.+?)\]\]>", r.text)
+    avatar  = re.search(r"<avatarFull><!\[CDATA\[(.+?)\]\]>", r.text)
+    return {
+        "persona": persona.group(1) if persona else steam_id,
+        "avatar":  avatar.group(1)  if avatar  else "",
+    }
+
+# ---------------------------------------------------------------------------
+# Steam library helpers
+# ---------------------------------------------------------------------------
+def get_installed_app_ids() -> list[str]:
+    """Read appmanifest_*.acf files to list installed Steam app IDs."""
+    app_ids = []
+    steam_apps = STEAM_DIR / "steamapps"
+    if not steam_apps.exists():
+        return app_ids
+    for mf in steam_apps.glob("appmanifest_*.acf"):
+        m = re.search(r"appmanifest_(\d+)\.acf", mf.name)
+        if m:
+            app_ids.append(m.group(1))
+    return app_ids
+
+
+def get_last_played() -> dict:
+    """Parse localconfig.vdf for per-app LastPlayed timestamps."""
+    timestamps: dict[str, str] = {}
+    steam_id = ""  # populated from session; best-effort here
+    userdata = STEAM_DIR / "userdata"
+    if not userdata.exists():
+        return timestamps
+    for uid_dir in userdata.iterdir():
+        config = uid_dir / "config" / "localconfig.vdf"
+        if not config.exists():
+            continue
+        text = config.read_text(errors="replace")
+        for m in re.finditer(r'"(\d{5,})"[\s\S]*?"LastPlayed"\s+"(\d+)"', text):
+            timestamps[m.group(1)] = m.group(2)
+    return timestamps
+
+
+async def fetch_owned_games_api(steam_id: str) -> list[dict]:
+    """Fetch owned games list from Steam Web API (requires API key)."""
     url = (
-        f"https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/"
-        f"?key={STEAM_API_KEY}&steamids={steam_id}"
+        f"https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/"
+        f"?key={STEAM_API_KEY}&steamid={steam_id}"
+        f"&include_appinfo=true&include_played_free_games=true"
     )
     async with httpx.AsyncClient() as client:
-        resp = await client.get(url)
-    players = resp.json().get("response", {}).get("players", [])
-    if not players:
-        return (steam_id, "")
-    p = players[0]
-    return (p.get("personaname", steam_id), p.get("avatarfull", ""))
+        r = await client.get(url, timeout=15)
+    return r.json().get("response", {}).get("games", [])
 
-async def _fetch_owned(steam_id: str) -> list[dict]:
-    """Return list of owned-game dicts from IPlayerService/GetOwnedGames."""
-    params = {
-        "key":                    STEAM_API_KEY,
-        "steamid":                steam_id,
-        "include_appinfo":        "1",
-        "include_played_free_games": "1",
-    }
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(STEAM_OWNED_URL, params=params)
-    games = resp.json().get("response", {}).get("games", [])
-    result = []
-    for g in games:
-        app_id = str(g.get("appid", ""))
-        if not app_id:
-            continue
-        result.append({
-            "appId":    app_id,
-            "name":     g.get("name", ""),
-            "coverUrl": f"{STEAM_CDN}/{app_id}/library_600x900.jpg",
-            "logoUrl":  f"{STEAM_CDN}/{app_id}/header.jpg",
-        })
-    return result
 
-def _get_session(request: Request) -> Optional[dict]:
-    token = request.cookies.get("deck_session")
-    if not token:
-        return None
-    session = _sessions.get(token)
-    if not session:
-        return None
-    if datetime.utcnow() > session["expires"]:
-        _sessions.pop(token, None)
-        return None
-    return session
-
-# ── Routes ────────────────────────────────────────────────────────────────────
-
+# ---------------------------------------------------------------------------
+# Routes — Auth
+# ---------------------------------------------------------------------------
 @app.get("/auth/steam")
-async def steam_login():
-    """Entry point: redirect user to Steam OpenID."""
-    return_to = f"{BACKEND_HOST}/auth/steam/callback"
-    realm     = BACKEND_HOST
-    params = _openid_params(return_to, realm)
-    url = STEAM_OPENID_URL + "?" + urllib.parse.urlencode(params)
-    return RedirectResponse(url)
+async def auth_steam_begin():
+    """Redirect browser to Steam OpenID login."""
+    params = build_openid_params(RETURN_TO, REALM)
+    qs = "&".join(f"{k}={v}" for k, v in params.items())
+    return RedirectResponse(f"{OPENID_ENDPOINT}?{qs}")
+
 
 @app.get("/auth/steam/callback")
-async def steam_callback(request: Request):
-    """Steam redirects here after user approves. Verify and issue session."""
+async def auth_steam_callback(request: Request):
+    """Handle Steam's OpenID return assertion."""
     params = dict(request.query_params)
-    steam_id = await _verify_openid(params)
+    claimed_id = params.get("openid.claimed_id", "")
+    steam_id   = extract_steam_id(claimed_id)
+
     if not steam_id:
-        raise HTTPException(status_code=400, detail="OpenID verification failed")
+        raise HTTPException(400, "Missing or invalid claimed_id")
 
-    persona, avatar = await _fetch_persona(steam_id)
-    token   = _new_token()
-    expires = datetime.utcnow() + timedelta(days=30)
-    _sessions[token] = {
-        "steam_id": steam_id,
-        "persona":  persona,
-        "avatar":   avatar,
-        "expires":  expires,
-    }
+    valid = await verify_openid(params)
+    if not valid:
+        raise HTTPException(403, "OpenID verification failed")
 
-    # Redirect to /auth/steam/done – the webview in the Deck shell watches for this URL
-    response = RedirectResponse(f"{BACKEND_HOST}/auth/steam/done?persona={urllib.parse.quote(persona)}")
-    response.set_cookie(
-        key="deck_session",
-        value=token,
-        httponly=True,
-        secure=True,
-        samesite="lax",
-        max_age=30 * 24 * 3600,
-    )
-    return response
+    summary = await fetch_player_summary(steam_id)
+
+    request.session["steam_id"]  = steam_id
+    request.session["persona"]   = summary["persona"]
+    request.session["avatar"]    = summary["avatar"]
+    request.session["linked"]    = True
+
+    # Redirect to /auth/steam/done — QML watches for this URL to close overlay
+    return RedirectResponse(f"{BACKEND_URL}/auth/steam/done")
+
 
 @app.get("/auth/steam/done", response_class=HTMLResponse)
-async def steam_done(persona: str = ""):
-    """Landing page the Deck shell webview watches for to know login is complete."""
-    return HTMLResponse(f"""
-    <html><head><title>Signed in</title></head>
-    <body style="background:#14161a;color:#e8e8e8;font-family:sans-serif;text-align:center;padding-top:20vh">
-        <h1>&#x2665; Signed in as {persona}</h1>
-        <p>You can close this window and return to the Deck Shell.</p>
-    </body></html>
-    """)
+async def auth_steam_done(request: Request):
+    """Minimal page — QML's onUrlChanged closes the WebEngineView when it sees this URL."""
+    persona = request.session.get("persona", "")
+    return HTMLResponse(
+        f"<html><body style='background:#14161a;color:white;font-family:sans-serif;"
+        f"display:flex;align-items:center;justify-content:center;height:100vh;margin:0'>"
+        f"<h2>\u2714 Signed in as {persona}. Returning to Deck Shell\u2026</h2>"
+        f"</body></html>"
+    )
+
 
 @app.get("/auth/status")
 async def auth_status(request: Request):
-    session = _get_session(request)
-    if not session:
-        return JSONResponse({"linked": False})
+    linked = request.session.get("linked", False)
     return JSONResponse({
-        "linked":   True,
-        "steamId":  session["steam_id"],
-        "persona":  session["persona"],
-        "avatar":   session["avatar"],
+        "linked":   linked,
+        "steamId":  request.session.get("steam_id", ""),
+        "persona":  request.session.get("persona",  ""),
+        "avatar":   request.session.get("avatar",   ""),
     })
 
+
 @app.post("/auth/logout")
-async def logout(request: Request, response: Response):
-    token = request.cookies.get("deck_session")
-    if token:
-        _sessions.pop(token, None)
-    response.delete_cookie("deck_session")
+async def auth_logout(request: Request):
+    request.session.clear()
     return JSONResponse({"ok": True})
 
+
+# ---------------------------------------------------------------------------
+# Routes — Library
+# ---------------------------------------------------------------------------
 @app.get("/library/owned")
 async def library_owned(request: Request):
-    """Return JSON list of games owned by the signed-in user."""
-    session = _get_session(request)
-    if not session:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    games = await _fetch_owned(session["steam_id"])
+    """Return all owned games (API, if key+session) merged with installed state."""
+    installed_ids = set(get_installed_app_ids())
+    last_played   = get_last_played()
+
+    steam_id = request.session.get("steam_id", "")
+
+    games: list[dict] = []
+
+    # Path A: API key + logged-in user → full owned list
+    if STEAM_API_KEY and steam_id:
+        try:
+            owned = await fetch_owned_games_api(steam_id)
+            for g in owned:
+                app_id = str(g["appid"])
+                games.append({
+                    "appId":      app_id,
+                    "name":       g.get("name", f"App {app_id}"),
+                    "installed":  app_id in installed_ids,
+                    "coverUrl":   f"https://cdn.akamai.steamstatic.com/steam/apps/{app_id}/library_600x900.jpg",
+                    "lastPlayed": last_played.get(app_id, "0"),
+                })
+            return JSONResponse({"games": games, "source": "api"})
+        except Exception:
+            pass  # fall through to local-only
+
+    # Path B: local installed games only
+    for app_id in installed_ids:
+        name = f"App {app_id}"   # could parse from appmanifest ACF
+        games.append({
+            "appId":      app_id,
+            "name":       name,
+            "installed":  True,
+            "coverUrl":   f"https://cdn.akamai.steamstatic.com/steam/apps/{app_id}/library_600x900.jpg",
+            "lastPlayed": last_played.get(app_id, "0"),
+        })
+    return JSONResponse({"games": games, "source": "local"})
+
+
+@app.get("/library/installed")
+async def library_installed():
+    installed_ids = get_installed_app_ids()
+    last_played   = get_last_played()
+    games = [
+        {
+            "appId":      aid,
+            "name":       f"App {aid}",
+            "installed":  True,
+            "coverUrl":   f"https://cdn.akamai.steamstatic.com/steam/apps/{aid}/library_600x900.jpg",
+            "lastPlayed": last_played.get(aid, "0"),
+        }
+        for aid in installed_ids
+    ]
     return JSONResponse({"games": games})
+
+
+# ---------------------------------------------------------------------------
+# Routes — System power
+# ---------------------------------------------------------------------------
+@app.post("/system/power")
+async def system_power(request: Request):
+    body = await request.json()
+    action = body.get("action", "")
+    cmds = {
+        "shutdown": ["systemctl", "poweroff"],
+        "reboot":   ["systemctl", "reboot"],
+        "suspend":  ["systemctl", "suspend"],
+    }
+    if action not in cmds:
+        raise HTTPException(400, f"Unknown action: {action}")
+    subprocess.Popen(cmds[action])
+    return JSONResponse({"ok": True})

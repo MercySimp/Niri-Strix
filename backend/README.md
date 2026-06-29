@@ -1,42 +1,51 @@
-# Deck Shell – Steam Auth Backend
+# Deck Shell Backend
 
-A small FastAPI service that:
-1. Implements the Steam OpenID 2.0 login flow.
-2. Verifies the OpenID assertion and extracts the user's SteamID64.
-3. Fetches owned games via `IPlayerService/GetOwnedGames` using **your** API key (users never manage keys).
-4. Issues a secure HTTP-only session cookie so the Deck Shell QML client can call `/library/owned`.
+FastAPI service that handles Steam OpenID authentication and library queries
+for the Deck Shell QML frontend.
 
 ## Setup
 
 ```bash
-cd backend
-python3 -m venv .venv
+python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-
-cp .env.example .env
-# Edit .env and fill in STEAM_API_KEY, BACKEND_HOST, SECRET_KEY
-export $(grep -v '^#' .env | xargs)
-
-uvicorn main:app --host 0.0.0.0 --port 8000
 ```
+
+## Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `DECK_SECRET` | `change_me_in_production` | Session signing key — **change this** |
+| `STEAM_API_KEY` | *(empty)* | [Steam Web API key](https://steamcommunity.com/dev/apikey). Required for full owned-game list. Without it only locally installed games are returned. |
+| `BACKEND_URL` | `http://localhost:8000` | Public base URL of this server (used in OpenID `return_to`) |
+| `STEAM_DIR` | `~/.local/share/Steam` | Path to your Steam installation |
+
+## Running
+
+```bash
+DECK_SECRET=mysecret STEAM_API_KEY=YOUR_KEY uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+## Auth flow
+
+1. QML opens `WebEngineView` → `GET /auth/steam`
+2. Backend redirects to `https://steamcommunity.com/openid/login` with proper OpenID params.
+3. User logs in on Steam's website.
+4. Steam redirects to `GET /auth/steam/callback` with the signed assertion.
+5. Backend verifies the assertion, fetches persona/avatar, stores session cookie.
+6. Backend redirects to `GET /auth/steam/done`.
+7. QML's `onUrlChanged` sees `/auth/steam/done` → closes the WebEngineView.
+8. QML polls `GET /auth/status` → updates persona/avatar in the UI.
 
 ## Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/auth/steam` | Redirect user to Steam OpenID login |
-| GET | `/auth/steam/callback` | Steam returns here; verify + issue session |
-| GET | `/auth/steam/done` | Landing page the Deck shell webview watches for |
-| GET | `/auth/status` | Return `{linked, steamId, persona, avatar}` |
-| POST | `/auth/logout` | Clear session |
-| GET | `/library/owned` | Return owned-games JSON for the signed-in user |
-
-## Deploying
-
-The backend must be reachable over **HTTPS** at the hostname you put in `BACKEND_HOST`.
-Steam's OpenID will not redirect to a plain HTTP URL in production.
-
-A minimal deployment: any VPS with nginx + certbot in front of uvicorn, or a free-tier render.com/fly.io service.
-
-The systemd unit at `deck-shell-backend.service` can be used if self-hosting on the same machine.
+| Method | Path | Auth required | Description |
+|---|---|---|---|
+| GET | `/auth/steam` | No | Begin OpenID flow |
+| GET | `/auth/steam/callback` | No | OpenID return handler |
+| GET | `/auth/steam/done` | No | Success page (closes overlay) |
+| GET | `/auth/status` | No | Current session state |
+| POST | `/auth/logout` | No | Clear session |
+| GET | `/library/owned` | Session (optional) | All owned games (API) or installed games (fallback) |
+| GET | `/library/installed` | No | Locally installed games only |
+| POST | `/system/power` | No | `{action: shutdown\|reboot\|suspend}` |
