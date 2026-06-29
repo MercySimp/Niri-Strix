@@ -11,7 +11,9 @@ ListModel {
     id: root
 
     // 0 = Installed only, 1 = All Owned
-    property int  filterMode: 0
+    // Default to All Owned so games are visible immediately after sign-in,
+    // even before Steam is installed / ACF files exist on disk.
+    property int  filterMode: 1
     property bool loading:    false
 
     // Full owned list returned by the remote server

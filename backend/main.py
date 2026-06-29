@@ -7,7 +7,9 @@ GET  /auth/steam/callback → handle OpenID return, store session
 GET  /auth/steam/done     → success page with user data in query params for QML shell
 GET  /auth/status         → {linked, persona, avatar, steamId}
 POST /auth/logout         → clear session
-GET  /library/owned       → {games: [{appId, name, coverUrl, lastPlayed}]}
+GET  /library/owned       → {games: [{appId, name, coverUrl, playtimeForever}]}
+                            Accepts optional ?steamid=XXXXX query param so the
+                            QML shell can fetch without relying on session cookies.
 POST /system/power        → {action: shutdown|reboot|suspend}
 """
 
@@ -38,7 +40,7 @@ REALM           = BACKEND_URL
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
-app = FastAPI(title="Deck Shell API", version="0.3.0")
+app = FastAPI(title="Deck Shell API", version="0.4.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -142,15 +144,15 @@ async def auth_steam_callback(request: Request):
     persona = summary["persona"]
     avatar  = summary["avatar"]
 
-    # Store in session for /auth/status and /library/owned
+    # Store in session for /auth/status
     request.session["steam_id"] = steam_id
     request.session["persona"]  = persona
     request.session["avatar"]   = avatar
     request.session["linked"]   = True
 
-    # Redirect to /done with user data embedded as query params.
+    # Redirect to /done with user data as query params.
     # The QML shell reads these directly from the URL so it never needs
-    # to make a separate cookie-authenticated request.
+    # a separate cookie-authenticated request.
     done_url = (
         f"{BACKEND_URL}/auth/steam/done"
         f"?persona={quote(persona)}"
@@ -162,14 +164,10 @@ async def auth_steam_callback(request: Request):
 
 @app.get("/auth/steam/done", response_class=HTMLResponse)
 async def auth_steam_done(request: Request):
-    # persona may come from query params (fresh login) or session (page reload)
     persona = request.query_params.get("persona") or request.session.get("persona", "")
     avatar  = request.query_params.get("avatar")  or request.session.get("avatar", "")
     steamid = request.query_params.get("steamid") or request.session.get("steam_id", "")
 
-    # The shell's onUrlChanged fires as soon as this URL is hit, so the
-    # page content is mostly cosmetic — but we keep it friendly in case
-    # someone lands here in a real browser.
     return HTMLResponse(
         f"<html><body style='background:#14161a;color:white;font-family:sans-serif;"
         f"display:flex;align-items:center;justify-content:center;height:100vh;margin:0'>"
@@ -196,10 +194,18 @@ async def auth_logout(request: Request):
 
 # ---------------------------------------------------------------------------
 # Routes — Library
+#
+# Accepts an optional ?steamid= query parameter so the QML shell can pass
+# the Steam ID it received from the login redirect URL directly, without
+# relying on session cookies (which may not be forwarded by WebEngineView).
 # ---------------------------------------------------------------------------
 @app.get("/library/owned")
 async def library_owned(request: Request):
-    steam_id = request.session.get("steam_id", "")
+    # Prefer explicit steamid param, fall back to session
+    steam_id = (
+        request.query_params.get("steamid")
+        or request.session.get("steam_id", "")
+    )
     games: list[dict] = []
 
     if STEAM_API_KEY and steam_id:
