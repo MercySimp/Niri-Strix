@@ -18,18 +18,21 @@ int main(int argc, char *argv[])
     GamepadHandler gamepad;
     engine.rootContext()->setContextProperty("Gamepad", &gamepad);
 
-    // Steam library model — exposed to QML as "SteamLibrary"
+    // Steam library model — exposed to QML as both:
+    //   SteamLibrary      → used as ListView/GridView model (data roles)
+    //   SteamLibraryCtrl  → used for Q_INVOKABLE method calls from QML
+    // This split avoids a Qt6 issue where QAbstractListModel objects used
+    // as view models get wrapped in a proxy that shadows Q_INVOKABLE methods.
     SteamLibraryModel steamLibrary;
-    engine.rootContext()->setContextProperty("SteamLibrary", &steamLibrary);
+    engine.rootContext()->setContextProperty("SteamLibrary",     &steamLibrary);
+    engine.rootContext()->setContextProperty("SteamLibraryCtrl", &steamLibrary);
 
-    // ── Meta-object debug dump ──────────────────────────────────────────────
-    // Prints every method registered on SteamLibraryModel so we can confirm
-    // fetchOwnedGamesForId is visible to the QML meta-object system.
+    // ── Meta-object debug dump ─────────────────────────────────────────────
     const QMetaObject *mo = steamLibrary.metaObject();
     qDebug() << "Class =" << mo->className();
     for (int i = mo->methodOffset(); i < mo->methodCount(); ++i)
         qDebug() << mo->method(i).methodSignature();
-    // ───────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
 
     const QUrl qmlMain(QStringLiteral("file:///usr/share/deck-shell/main.qml"));
     engine.load(qmlMain);
