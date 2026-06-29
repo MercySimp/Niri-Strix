@@ -150,7 +150,6 @@ void SteamLibraryModel::setFilterMode(int mode)
     if (mode == m_filterMode) return;
     m_filterMode = mode;
     emit filterModeChanged();
-    // Changing filter just affects what QML shows; the merged list stays the same
     emit countChanged();
     emit dataChanged(index(0,0), index(rowCount()-1,0));
 }
@@ -163,47 +162,81 @@ void SteamLibraryModel::refresh()
     for (const QString &root : findLibraryRoots())
         local << parseLibraryRoot(root);
 
-    // Sort local installed games alphabetically
     std::sort(local.begin(), local.end(), [](const SteamGame &a, const SteamGame &b) {
         return a.name.toLower() < b.name.toLower();
     });
 
     m_gamesLocal = local;
-
-    // Start Web API request for owned titles; merged list set in reply handler
     fetchOwnedGames();
 }
 
+// Shared helper — builds and fires the Steam Web API request given explicit credentials.
+static QUrl buildOwnedGamesUrl(const QString &steamId, const QString &apiKey)
+{
+    QUrl url(QStringLiteral("https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/"));
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("key"),                       apiKey);
+    q.addQueryItem(QStringLiteral("steamid"),                   steamId);
+    q.addQueryItem(QStringLiteral("include_appinfo"),           QStringLiteral("1"));
+    q.addQueryItem(QStringLiteral("include_played_free_games"), QStringLiteral("1"));
+    url.setQuery(q);
+    return url;
+}
+
+// Called at startup — uses STEAM_API_KEY / STEAM_ID64 env vars.
 void SteamLibraryModel::fetchOwnedGames()
 {
-    const QByteArray key = qgetenv("STEAM_API_KEY");
-    const QByteArray id  = qgetenv("STEAM_ID64");
+    const QString key = QString::fromUtf8(qgetenv("STEAM_API_KEY"));
+    const QString id  = QString::fromUtf8(qgetenv("STEAM_ID64"));
+
     if (key.isEmpty() || id.isEmpty()) {
-        // No Web API configuration; fall back to local installed only
-        QList<SteamGame> merged = m_gamesLocal;
-        setMergedGames(merged);
+        // Env vars not set yet; just show local installed games for now.
+        // QML will call fetchOwnedGamesForId() after the user signs in.
+        setMergedGames(m_gamesLocal);
         setLoading(false);
-        emit errorOccurred("STEAM_API_KEY/STEAM_ID64 not set; showing installed games only.");
         return;
     }
 
-    QUrl url(QStringLiteral("https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/"));
-    QUrlQuery q;
-    q.addQueryItem("key", QString::fromUtf8(key));
-    q.addQueryItem("steamid", QString::fromUtf8(id));
-    q.addQueryItem("include_appinfo", "1");
-    q.addQueryItem("include_played_free_games", "1");
-    url.setQuery(q);
+    QNetworkRequest req(buildOwnedGamesUrl(id, key));
+    m_nam.get(req);
+}
 
-    QNetworkRequest req(url);
+// Called from QML after Steam login completes.
+// steamId comes from the /auth/steam/done?steamid= redirect URL.
+// apiKey: pass the key from your .env, or leave empty to fall back to env var.
+void SteamLibraryModel::fetchOwnedGamesForId(const QString &steamId, const QString &apiKey)
+{
+    if (steamId.isEmpty()) return;
+
+    const QString key = apiKey.isEmpty()
+        ? QString::fromUtf8(qgetenv("STEAM_API_KEY"))
+        : apiKey;
+
+    if (key.isEmpty()) {
+        emit errorOccurred(QStringLiteral(
+            "No Steam API key available. Set STEAM_API_KEY env var or pass it explicitly."));
+        return;
+    }
+
+    setLoading(true);
+
+    // Re-scan local installs in case something changed since startup
+    QList<SteamGame> local;
+    for (const QString &root : findLibraryRoots())
+        local << parseLibraryRoot(root);
+    std::sort(local.begin(), local.end(), [](const SteamGame &a, const SteamGame &b) {
+        return a.name.toLower() < b.name.toLower();
+    });
+    m_gamesLocal = local;
+
+    QNetworkRequest req(buildOwnedGamesUrl(steamId, key));
     m_nam.get(req);
 }
 
 void SteamLibraryModel::handleOwnedGamesReply(QNetworkReply *reply)
 {
     if (reply->error() != QNetworkReply::NoError) {
-        QList<SteamGame> merged = m_gamesLocal;
-        setMergedGames(merged);
+        setMergedGames(m_gamesLocal);
         setLoading(false);
         emit errorOccurred(QStringLiteral("Steam Web API error: %1").arg(reply->errorString()));
         reply->deleteLater();
@@ -214,41 +247,35 @@ void SteamLibraryModel::handleOwnedGamesReply(QNetworkReply *reply)
     reply->deleteLater();
 
     QJsonDocument doc = QJsonDocument::fromJson(bytes);
-    QJsonObject rootObj = doc.object();
-    QJsonObject responseObj = rootObj.value("response").toObject();
-    QJsonArray gamesArr = responseObj.value("games").toArray();
+    QJsonArray gamesArr = doc.object()
+                            .value(QStringLiteral("response")).toObject()
+                            .value(QStringLiteral("games")).toArray();
 
-    // Index local installed games by appId for quick lookup
     QHash<QString, SteamGame> localById;
     for (const SteamGame &g : m_gamesLocal)
         localById.insert(g.appId, g);
 
     QList<SteamGame> merged;
-
     for (const QJsonValue &v : gamesArr) {
         QJsonObject obj = v.toObject();
-        const QString appId = QString::number(obj.value("appid").toInt());
-        const QString name  = obj.value("name").toString();
+        const QString appId = QString::number(obj.value(QStringLiteral("appid")).toInt());
+        const QString name  = obj.value(QStringLiteral("name")).toString();
         if (appId.isEmpty() || name.isEmpty()) continue;
 
         SteamGame g;
         if (localById.contains(appId)) {
-            // Installed game: start from local manifest data
             g = localById.value(appId);
         } else {
-            g.appId = appId;
-            g.name  = name;
-            g.installed   = false;
-            g.sizeOnDisk  = 0;
-            g.lastPlayed  = QString();
-            g.coverUrl = QStringLiteral("https://cdn.steamstatic.com/steam/apps/%1/library_600x900.jpg").arg(appId);
-            g.logoUrl  = QStringLiteral("https://cdn.steamstatic.com/steam/apps/%1/header.jpg").arg(appId);
+            g.appId      = appId;
+            g.name       = name;
+            g.installed  = false;
+            g.sizeOnDisk = 0;
+            g.coverUrl   = QStringLiteral("https://cdn.steamstatic.com/steam/apps/%1/library_600x900.jpg").arg(appId);
+            g.logoUrl    = QStringLiteral("https://cdn.steamstatic.com/steam/apps/%1/header.jpg").arg(appId);
         }
-
         merged << g;
     }
 
-    // If Web API returned nothing, fall back to local only
     if (merged.isEmpty())
         merged = m_gamesLocal;
 
@@ -277,11 +304,9 @@ int SteamLibraryModel::rowCount(const QModelIndex &parent) const
     if (m_filterMode == InstalledOnly) {
         int count = 0;
         for (const SteamGame &g : m_gamesMerged)
-            if (g.installed)
-                ++count;
+            if (g.installed) ++count;
         return count;
     }
-
     return m_gamesMerged.size();
 }
 
@@ -289,11 +314,9 @@ QVariant SteamLibraryModel::data(const QModelIndex &index, int role) const
 {
     if (!index.isValid()) return {};
 
-    // Map view index to underlying merged list based on filter mode
     int row = index.row();
     if (m_filterMode == InstalledOnly) {
-        int logical = -1;
-        int i = 0;
+        int logical = -1, i = 0;
         for (int k = 0; k < m_gamesMerged.size(); ++k) {
             if (m_gamesMerged[k].installed) {
                 if (i == row) { logical = k; break; }
@@ -308,13 +331,13 @@ QVariant SteamLibraryModel::data(const QModelIndex &index, int role) const
     const SteamGame &g = m_gamesMerged.at(row);
 
     switch (role) {
-    case AppIdRole:     return g.appId;
-    case NameRole:      return g.name;
-    case CoverUrlRole:  return g.coverUrl;
-    case LogoUrlRole:   return g.logoUrl;
-    case InstalledRole: return g.installed;
-    case SizeRole:      return g.sizeOnDisk;
-    case LastPlayedRole:return g.lastPlayed;
+    case AppIdRole:      return g.appId;
+    case NameRole:       return g.name;
+    case CoverUrlRole:   return g.coverUrl;
+    case LogoUrlRole:    return g.logoUrl;
+    case InstalledRole:  return g.installed;
+    case SizeRole:       return g.sizeOnDisk;
+    case LastPlayedRole: return g.lastPlayed;
     }
     return {};
 }

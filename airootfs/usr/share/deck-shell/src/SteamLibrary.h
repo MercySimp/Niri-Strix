@@ -56,6 +56,13 @@ public:
     Q_INVOKABLE void launchGame(const QString &appId);
     Q_INVOKABLE void installGame(const QString &appId);
 
+    // Called from QML after Steam login completes.
+    // steamId: the 64-bit Steam ID from the login redirect URL.
+    // apiKey:  the Steam Web API key; pass empty string to use the
+    //          STEAM_API_KEY env var (set it in the .env / systemd unit).
+    Q_INVOKABLE void fetchOwnedGamesForId(const QString &steamId,
+                                          const QString &apiKey = {});
+
 signals:
     void loadingChanged();
     void countChanged();
@@ -66,7 +73,7 @@ private slots:
     void handleOwnedGamesReply(QNetworkReply *reply);
 
 private:
-    static QStringList  findLibraryRoots();
+    static QStringList      findLibraryRoots();
     static QList<SteamGame> parseLibraryRoot(const QString &libraryPath);
     static SteamGame        parseAppManifest(const QString &acfPath);
     static QString          steamBasePath();
@@ -80,5 +87,5 @@ private:
 
     void setLoading(bool v);
     void setMergedGames(QList<SteamGame> games);
-    void fetchOwnedGames();
+    void fetchOwnedGames();   // uses env vars
 };

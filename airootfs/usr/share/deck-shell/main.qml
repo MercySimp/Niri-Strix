@@ -32,8 +32,9 @@ ApplicationWindow {
         return ""
     }
 
-    // Called after login completes — reads user info embedded in the redirect URL
-    // Backend should redirect to: /auth/steam/done?persona=NAME&avatar=URL&steamid=ID
+    // Called after login completes.
+    // Reads persona/avatar/steamid from the redirect URL, then asks the
+    // C++ SteamLibraryModel to fetch owned games directly from the Steam Web API.
     function handleLoginDone(urlStr) {
         var persona = getParam(urlStr, "persona")
         var avatar  = getParam(urlStr, "avatar")
@@ -44,14 +45,17 @@ ApplicationWindow {
             steamPersona = persona
             steamAvatar  = avatar
             steamId      = sid
-            fetchLibraryViaWebEngine()
+
+            // Tell the C++ model to fetch owned games using this Steam ID.
+            // The STEAM_API_KEY env var must be set on the machine running deck-shell.
+            // If it is not set, only locally installed games will appear.
+            SteamLibrary.fetchOwnedGamesForId(sid)
         } else {
-            // Fallback: try XHR with credentials in case cookies do work
             pollAuthStatus()
         }
     }
 
-    // XHR fallback — works if backend sets SameSite=None; Secure cookies
+    // XHR fallback for startup session restore
     function pollAuthStatus() {
         var xhr = new XMLHttpRequest()
         xhr.open("GET", backendUrl + "/auth/status", true)
@@ -63,10 +67,10 @@ ApplicationWindow {
                     var data = JSON.parse(xhr.responseText)
                     if (data.linked) {
                         steamLinked  = data.linked
-                        steamPersona = data.persona || ""
-                        steamAvatar  = data.avatar  || ""
-                        steamId      = data.steamId || ""
-                        fetchLibraryViaWebEngine()
+                        steamPersona = data.persona  || ""
+                        steamAvatar  = data.avatar   || ""
+                        steamId      = data.steamId  || ""
+                        SteamLibrary.fetchOwnedGamesForId(steamId)
                     }
                 } catch(e) { console.warn("pollAuthStatus parse error:", e) }
             } else {
@@ -76,47 +80,16 @@ ApplicationWindow {
         xhr.send()
     }
 
-    // Load library by navigating a hidden WebEngineView to /library/owned
-    // so the session cookie is sent automatically by the WebEngine cookie store
-    function fetchLibraryViaWebEngine() {
-        libraryFetcher.url = backendUrl + "/library/owned"
-    }
-
     function doLogout() {
-        logoutFetcher.url = backendUrl + "/auth/logout"
+        var xhr = new XMLHttpRequest()
+        xhr.open("POST", backendUrl + "/auth/logout", true)
+        xhr.withCredentials = true
+        xhr.send()
         steamLinked  = false
         steamPersona = ""
         steamAvatar  = ""
         steamId      = ""
-    }
-
-    // ── Hidden WebEngineView for authenticated library fetch ──────────────────────
-    WebEngineView {
-        id: libraryFetcher
-        visible: false
-        width: 1; height: 1
-        url: "about:blank"
-
-        onLoadingChanged: function(info) {
-            if (info.status === WebEngineView.LoadSucceededStatus) {
-                // Extract JSON from page body text
-                runJavaScript("document.body.innerText", function(text) {
-                    if (!text) return
-                    try {
-                        var data = JSON.parse(text)
-                        if (data.games) SteamLibrary.loadOwnedGames(data.games)
-                    } catch(e) { console.warn("Library JSON parse error:", e, text.substring(0,200)) }
-                    url = "about:blank"
-                })
-            }
-        }
-    }
-
-    WebEngineView {
-        id: logoutFetcher
-        visible: false
-        width: 1; height: 1
-        url: "about:blank"
+        SteamLibrary.refresh()
     }
 
     // Poll on startup in case the user was already logged in from a previous session
@@ -299,7 +272,12 @@ ApplicationWindow {
                     Text { text: SteamLibrary.count + " games"; color: "#8a9bb5"; font.pixelSize: 22; Layout.alignment: Qt.AlignVCenter }
                     Rectangle { width: 120; height: 44; color: "#1f2531"; radius: 10; border.color: "#2e3540"
                         Text { anchors.centerIn: parent; text: "\u21BA  Refresh"; color: "#8a9bb5"; font.pixelSize: 18 }
-                        MouseArea { anchors.fill: parent; onClicked: { SteamLibrary.refresh(); root.fetchLibraryViaWebEngine() } }
+                        MouseArea { anchors.fill: parent; onClicked: {
+                            if (root.steamId !== "")
+                                SteamLibrary.fetchOwnedGamesForId(root.steamId)
+                            else
+                                SteamLibrary.refresh()
+                        }}
                     }
                 }
 
@@ -383,7 +361,9 @@ ApplicationWindow {
                     Text { text: "\uD83C\uDFAE"; font.pixelSize: 64; anchors.horizontalCenter: parent.horizontalCenter }
                     Text { text: "No games found"; color: "#e8e8e8"; font.pixelSize: 30; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
                     Text {
-                        text: root.steamLinked ? "Install a game from the Store." : "Sign in with Steam in Settings to see your full library."
+                        text: root.steamLinked
+                            ? (root.steamId !== "" ? "Make sure STEAM_API_KEY is set on this machine." : "Install a game from the Store.")
+                            : "Sign in with Steam in Settings to see your full library."
                         color: "#555e6e"; font.pixelSize: 20; anchors.horizontalCenter: parent.horizontalCenter
                     }
                 }
@@ -412,7 +392,6 @@ ApplicationWindow {
 
                 onUrlChanged: {
                     var u = url.toString()
-                    // Detect completion — handles both /done and /callback patterns
                     if (u.includes("/auth/steam/done") || u.includes("/auth/steam/callback")) {
                         visible = false
                         url = "about:blank"
