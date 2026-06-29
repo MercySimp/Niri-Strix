@@ -7,6 +7,7 @@
 #include <QStandardPaths>
 #include <QProcess>
 #include <QUrl>
+#include <QUrlQuery>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
