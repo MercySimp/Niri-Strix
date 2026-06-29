@@ -150,9 +150,12 @@ void SteamLibraryModel::setFilterMode(int mode)
 {
     if (mode == m_filterMode) return;
     m_filterMode = mode;
+    // beginResetModel/endResetModel forces the GridView to re-query rowCount()
+    // and data(), so the visible set updates immediately when the filter changes.
+    beginResetModel();
+    endResetModel();
     emit filterModeChanged();
     emit countChanged();
-    emit dataChanged(index(0,0), index(rowCount()-1,0));
 }
 
 // Scan local .acf manifests — no network needed.
@@ -200,11 +203,14 @@ void SteamLibraryModel::handleLibraryReply(QNetworkReply *reply)
         return;
     }
 
-    QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+    QByteArray raw = reply->readAll();
+    qDebug() << "[SteamLibrary] /library/owned response:" << raw.left(200);
+
+    QJsonDocument doc = QJsonDocument::fromJson(raw);
     QJsonArray arr    = doc.object().value(QStringLiteral("games")).toArray();
 
     if (arr.isEmpty()) {
-        // Backend returned empty — just show installed games
+        qWarning() << "[SteamLibrary] backend returned empty games array — showing local installed only";
         setMergedGames(m_gamesLocal);
         setLoading(false);
         return;

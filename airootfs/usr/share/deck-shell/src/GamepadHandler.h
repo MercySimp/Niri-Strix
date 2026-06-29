@@ -34,6 +34,8 @@ signals:
     void dpadRight();
     void axisLeftY(float value);
     void axisLeftX(float value);
+    void lb();   // Left bumper  — cycle filter left
+    void rb();   // Right bumper — cycle filter right
 
 private slots:
     void poll() {
@@ -52,14 +54,16 @@ private slots:
                 break;
             case SDL_CONTROLLERBUTTONDOWN:
                 switch (e.cbutton.button) {
-                case SDL_CONTROLLER_BUTTON_A:             emit buttonA();    break;
-                case SDL_CONTROLLER_BUTTON_B:             emit buttonB();    break;
-                case SDL_CONTROLLER_BUTTON_X:             emit buttonX();    break;
-                case SDL_CONTROLLER_BUTTON_Y:             emit buttonY();    break;
-                case SDL_CONTROLLER_BUTTON_DPAD_UP:       emit dpadUp();     break;
-                case SDL_CONTROLLER_BUTTON_DPAD_DOWN:     emit dpadDown();   break;
-                case SDL_CONTROLLER_BUTTON_DPAD_LEFT:     emit dpadLeft();   break;
-                case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:    emit dpadRight();  break;
+                case SDL_CONTROLLER_BUTTON_A:             emit buttonA();  break;
+                case SDL_CONTROLLER_BUTTON_B:             emit buttonB();  break;
+                case SDL_CONTROLLER_BUTTON_X:             emit buttonX();  break;
+                case SDL_CONTROLLER_BUTTON_Y:             emit buttonY();  break;
+                case SDL_CONTROLLER_BUTTON_DPAD_UP:       emit dpadUp();   break;
+                case SDL_CONTROLLER_BUTTON_DPAD_DOWN:     emit dpadDown(); break;
+                case SDL_CONTROLLER_BUTTON_DPAD_LEFT:     emit dpadLeft(); break;
+                case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:    emit dpadRight();break;
+                case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:  emit lb();       break;
+                case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: emit rb();       break;
                 }
                 break;
             case SDL_CONTROLLERAXISMOTION:
