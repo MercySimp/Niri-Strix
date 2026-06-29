@@ -4,17 +4,29 @@
 #include <QFile>
 #include <QTextStream>
 #include <QRegularExpression>
-#include <QStandardPaths>
-#include <QProcess>
+#include <QNetworkRequest>
 #include <QUrl>
 #include <QUrlQuery>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QProcess>
 #include <QDebug>
 #include <algorithm>
-#include <cstdlib>
 
+// The Windows backend URL — all Steam API calls are made server-side.
+// Override at runtime by setting DECK_BACKEND_URL in the environment.
+static QString backendUrl()
+{
+    QByteArray env = qgetenv("DECK_BACKEND_URL");
+    return env.isEmpty()
+        ? QStringLiteral("https://api.accesshomeserver.uk")
+        : QString::fromUtf8(env);
+}
+
+// ---------------------------------------------------------------------------
+// VDF helpers
+// ---------------------------------------------------------------------------
 static QString vdfValue(const QStringList &lines, const QString &key)
 {
     QRegularExpression re(
@@ -27,17 +39,18 @@ static QString vdfValue(const QStringList &lines, const QString &key)
     return {};
 }
 
+// ---------------------------------------------------------------------------
+// Local Steam library scanning (installed games only)
+// ---------------------------------------------------------------------------
 QString SteamLibraryModel::steamBasePath()
 {
-    QString sym = QDir::homePath() + "/.steam/steam";
-    if (QDir(sym).exists()) return sym;
-
-    QString xdg = QDir::homePath() + "/.local/share/Steam";
-    if (QDir(xdg).exists()) return xdg;
-
-    QString flat = QDir::homePath() + "/.var/app/com.valvesoftware.Steam/data/Steam";
-    if (QDir(flat).exists()) return flat;
-
+    for (const QString &p : {
+            QDir::homePath() + "/.steam/steam",
+            QDir::homePath() + "/.local/share/Steam",
+            QDir::homePath() + "/.var/app/com.valvesoftware.Steam/data/Steam"
+         }) {
+        if (QDir(p).exists()) return p;
+    }
     return {};
 }
 
@@ -47,19 +60,16 @@ QStringList SteamLibraryModel::findLibraryRoots()
     if (base.isEmpty()) return {};
 
     QStringList roots;
-
     auto addRoot = [&](const QString &path) {
         QDir d(path);
         QString canon = d.canonicalPath();
         if (canon.isEmpty()) canon = d.absolutePath();
-        if (!roots.contains(canon))
-            roots << canon;
+        if (!roots.contains(canon)) roots << canon;
     };
 
     addRoot(base + "/steamapps");
 
-    QString vdfPath = base + "/steamapps/libraryfolders.vdf";
-    QFile f(vdfPath);
+    QFile f(base + "/steamapps/libraryfolders.vdf");
     if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return roots;
 
     QTextStream in(&f);
@@ -67,28 +77,20 @@ QStringList SteamLibraryModel::findLibraryRoots()
     while (!in.atEnd()) lines << in.readLine();
 
     QRegularExpression pathRe(R"rx(^\s*"path"\s+"([^"]+)")rx");
-    for (const QString &line : lines) {
-        auto m = pathRe.match(line);
-        if (m.hasMatch())
-            addRoot(m.captured(1) + "/steamapps");
-    }
-
     QRegularExpression legacyRe(R"rx(^\s*"[0-9]+"\s+"(/[^"]+)")rx");
     for (const QString &line : lines) {
-        auto m = legacyRe.match(line);
-        if (m.hasMatch())
-            addRoot(m.captured(1) + "/steamapps");
+        auto m = pathRe.match(line);
+        if (m.hasMatch()) { addRoot(m.captured(1) + "/steamapps"); continue; }
+        auto m2 = legacyRe.match(line);
+        if (m2.hasMatch()) addRoot(m2.captured(1) + "/steamapps");
     }
-
     return roots;
 }
 
 SteamGame SteamLibraryModel::parseAppManifest(const QString &acfPath)
 {
     QFile f(acfPath);
-    SteamGame g;
-    g.installed = false;
-    g.sizeOnDisk = 0;
+    SteamGame g{};
     if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return g;
 
     QTextStream in(&f);
@@ -98,36 +100,35 @@ SteamGame SteamLibraryModel::parseAppManifest(const QString &acfPath)
     g.appId      = vdfValue(lines, "appid");
     g.name       = vdfValue(lines, "name");
     g.lastPlayed = vdfValue(lines, "LastPlayed");
-    QString sizeStr = vdfValue(lines, "SizeOnDisk");
-    g.sizeOnDisk = sizeStr.isEmpty() ? 0 : sizeStr.toLongLong();
+    QString sz   = vdfValue(lines, "SizeOnDisk");
+    g.sizeOnDisk = sz.isEmpty() ? 0 : sz.toLongLong();
     g.installed  = !g.appId.isEmpty() && !g.name.isEmpty();
-
-    g.coverUrl = QStringLiteral("https://cdn.steamstatic.com/steam/apps/%1/library_600x900.jpg").arg(g.appId);
-    g.logoUrl  = QStringLiteral("https://cdn.steamstatic.com/steam/apps/%1/header.jpg").arg(g.appId);
-
+    g.coverUrl   = QStringLiteral("https://cdn.steamstatic.com/steam/apps/%1/library_600x900.jpg").arg(g.appId);
+    g.logoUrl    = QStringLiteral("https://cdn.steamstatic.com/steam/apps/%1/header.jpg").arg(g.appId);
     return g;
 }
 
-QList<SteamGame> SteamLibraryModel::parseLibraryRoot(const QString &libraryPath)
+QList<SteamGame> SteamLibraryModel::parseLibraryRoot(const QString &path)
 {
     QList<SteamGame> games;
-    QDir dir(libraryPath);
+    QDir dir(path);
     if (!dir.exists()) return games;
-
-    const QStringList acfFiles = dir.entryList({"appmanifest_*.acf"}, QDir::Files);
-    for (const QString &fn : acfFiles) {
+    for (const QString &fn : dir.entryList({"appmanifest_*.acf"}, QDir::Files)) {
         SteamGame g = parseAppManifest(dir.filePath(fn));
         if (g.installed) games << g;
     }
     return games;
 }
 
+// ---------------------------------------------------------------------------
+// Model
+// ---------------------------------------------------------------------------
 SteamLibraryModel::SteamLibraryModel(QObject *parent)
     : QAbstractListModel(parent)
 {
     connect(&m_nam, &QNetworkAccessManager::finished,
-            this, &SteamLibraryModel::handleOwnedGamesReply);
-    refresh();
+            this,   &SteamLibraryModel::handleLibraryReply);
+    refresh();   // load local installed games at startup
 }
 
 void SteamLibraryModel::setLoading(bool v)
@@ -154,136 +155,93 @@ void SteamLibraryModel::setFilterMode(int mode)
     emit dataChanged(index(0,0), index(rowCount()-1,0));
 }
 
+// Scan local .acf manifests — no network needed.
 void SteamLibraryModel::refresh()
 {
     setLoading(true);
-
     QList<SteamGame> local;
     for (const QString &root : findLibraryRoots())
         local << parseLibraryRoot(root);
-
     std::sort(local.begin(), local.end(), [](const SteamGame &a, const SteamGame &b) {
         return a.name.toLower() < b.name.toLower();
     });
-
     m_gamesLocal = local;
-    fetchOwnedGames();
+    setMergedGames(local);   // show installed games while we wait for sign-in
+    setLoading(false);
 }
 
-// Shared helper — builds and fires the Steam Web API request given explicit credentials.
-static QUrl buildOwnedGamesUrl(const QString &steamId, const QString &apiKey)
-{
-    QUrl url(QStringLiteral("https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/"));
-    QUrlQuery q;
-    q.addQueryItem(QStringLiteral("key"),                       apiKey);
-    q.addQueryItem(QStringLiteral("steamid"),                   steamId);
-    q.addQueryItem(QStringLiteral("include_appinfo"),           QStringLiteral("1"));
-    q.addQueryItem(QStringLiteral("include_played_free_games"), QStringLiteral("1"));
-    url.setQuery(q);
-    return url;
-}
-
-// Called at startup — uses STEAM_API_KEY / STEAM_ID64 env vars.
-void SteamLibraryModel::fetchOwnedGames()
-{
-    const QString key = QString::fromUtf8(qgetenv("STEAM_API_KEY"));
-    const QString id  = QString::fromUtf8(qgetenv("STEAM_ID64"));
-
-    if (key.isEmpty() || id.isEmpty()) {
-        // Env vars not set yet; just show local installed games for now.
-        // QML will call fetchOwnedGamesForId() after the user signs in.
-        setMergedGames(m_gamesLocal);
-        setLoading(false);
-        return;
-    }
-
-    QNetworkRequest req(buildOwnedGamesUrl(id, key));
-    m_nam.get(req);
-}
-
-// Called from QML after Steam login completes.
-// steamId comes from the /auth/steam/done?steamid= redirect URL.
-// apiKey: pass the key from your .env, or leave empty to fall back to env var.
-void SteamLibraryModel::fetchOwnedGamesForId(const QString &steamId, const QString &apiKey)
+// Ask the Windows backend for the full owned-games list.
+// The backend holds the Steam API key — Arch never needs one.
+void SteamLibraryModel::fetchOwnedGamesForId(const QString &steamId)
 {
     if (steamId.isEmpty()) return;
-
-    const QString key = apiKey.isEmpty()
-        ? QString::fromUtf8(qgetenv("STEAM_API_KEY"))
-        : apiKey;
-
-    if (key.isEmpty()) {
-        emit errorOccurred(QStringLiteral(
-            "No Steam API key available. Set STEAM_API_KEY env var or pass it explicitly."));
-        return;
-    }
-
     setLoading(true);
 
-    // Re-scan local installs in case something changed since startup
-    QList<SteamGame> local;
-    for (const QString &root : findLibraryRoots())
-        local << parseLibraryRoot(root);
-    std::sort(local.begin(), local.end(), [](const SteamGame &a, const SteamGame &b) {
-        return a.name.toLower() < b.name.toLower();
-    });
-    m_gamesLocal = local;
+    QUrl url(backendUrl() + QStringLiteral("/library/owned"));
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("steamid"), steamId);
+    url.setQuery(q);
 
-    QNetworkRequest req(buildOwnedGamesUrl(steamId, key));
+    QNetworkRequest req(url);
+    req.setRawHeader("Accept", "application/json");
     m_nam.get(req);
 }
 
-void SteamLibraryModel::handleOwnedGamesReply(QNetworkReply *reply)
+// Handle the JSON response from GET /library/owned
+void SteamLibraryModel::handleLibraryReply(QNetworkReply *reply)
 {
+    reply->deleteLater();
+
     if (reply->error() != QNetworkReply::NoError) {
-        setMergedGames(m_gamesLocal);
+        qWarning() << "[SteamLibrary] backend error:" << reply->errorString();
+        setMergedGames(m_gamesLocal);   // fall back to installed-only
         setLoading(false);
-        emit errorOccurred(QStringLiteral("Steam Web API error: %1").arg(reply->errorString()));
-        reply->deleteLater();
+        emit errorOccurred(QStringLiteral("Could not reach backend: %1").arg(reply->errorString()));
         return;
     }
 
-    const QByteArray bytes = reply->readAll();
-    reply->deleteLater();
+    QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+    QJsonArray arr    = doc.object().value(QStringLiteral("games")).toArray();
 
-    QJsonDocument doc = QJsonDocument::fromJson(bytes);
-    QJsonArray gamesArr = doc.object()
-                            .value(QStringLiteral("response")).toObject()
-                            .value(QStringLiteral("games")).toArray();
+    if (arr.isEmpty()) {
+        // Backend returned empty — just show installed games
+        setMergedGames(m_gamesLocal);
+        setLoading(false);
+        return;
+    }
 
+    // Build a lookup of locally-installed games so we can tag them
     QHash<QString, SteamGame> localById;
     for (const SteamGame &g : m_gamesLocal)
         localById.insert(g.appId, g);
 
     QList<SteamGame> merged;
-    for (const QJsonValue &v : gamesArr) {
-        QJsonObject obj = v.toObject();
-        const QString appId = QString::number(obj.value(QStringLiteral("appid")).toInt());
-        const QString name  = obj.value(QStringLiteral("name")).toString();
-        if (appId.isEmpty() || name.isEmpty()) continue;
+    merged.reserve(arr.size());
+    for (const QJsonValue &v : arr) {
+        QJsonObject obj  = v.toObject();
+        const QString id = obj.value(QStringLiteral("appId")).toString();
+        const QString nm = obj.value(QStringLiteral("name")).toString();
+        if (id.isEmpty() || nm.isEmpty()) continue;
 
         SteamGame g;
-        if (localById.contains(appId)) {
-            g = localById.value(appId);
+        if (localById.contains(id)) {
+            g = localById.value(id);   // keep local metadata (size, lastPlayed)
         } else {
-            g.appId      = appId;
-            g.name       = name;
-            g.installed  = false;
-            g.sizeOnDisk = 0;
-            g.coverUrl   = QStringLiteral("https://cdn.steamstatic.com/steam/apps/%1/library_600x900.jpg").arg(appId);
-            g.logoUrl    = QStringLiteral("https://cdn.steamstatic.com/steam/apps/%1/header.jpg").arg(appId);
+            g.appId     = id;
+            g.name      = nm;
+            g.installed = false;
+            g.coverUrl  = obj.value(QStringLiteral("coverUrl")).toString(
+                          QStringLiteral("https://cdn.steamstatic.com/steam/apps/%1/library_600x900.jpg").arg(id));
+            g.logoUrl   = QStringLiteral("https://cdn.steamstatic.com/steam/apps/%1/header.jpg").arg(id);
         }
         merged << g;
     }
-
-    if (merged.isEmpty())
-        merged = m_gamesLocal;
 
     std::sort(merged.begin(), merged.end(), [](const SteamGame &a, const SteamGame &b) {
         return a.name.toLower() < b.name.toLower();
     });
 
-    setMergedGames(merged);
+    setMergedGames(merged.isEmpty() ? m_gamesLocal : merged);
     setLoading(false);
 }
 
@@ -300,12 +258,10 @@ void SteamLibraryModel::installGame(const QString &appId)
 int SteamLibraryModel::rowCount(const QModelIndex &parent) const
 {
     if (parent.isValid()) return 0;
-
     if (m_filterMode == InstalledOnly) {
-        int count = 0;
-        for (const SteamGame &g : m_gamesMerged)
-            if (g.installed) ++count;
-        return count;
+        int n = 0;
+        for (const SteamGame &g : m_gamesMerged) if (g.installed) ++n;
+        return n;
     }
     return m_gamesMerged.size();
 }
@@ -316,17 +272,16 @@ QVariant SteamLibraryModel::data(const QModelIndex &index, int role) const
 
     int row = index.row();
     if (m_filterMode == InstalledOnly) {
-        int logical = -1, i = 0;
+        int i = 0;
         for (int k = 0; k < m_gamesMerged.size(); ++k) {
             if (m_gamesMerged[k].installed) {
-                if (i == row) { logical = k; break; }
+                if (i == row) { row = k; goto found; }
                 ++i;
             }
         }
-        if (logical < 0) return {};
-        row = logical;
+        return {};
     }
-
+    found:
     if (row < 0 || row >= m_gamesMerged.size()) return {};
     const SteamGame &g = m_gamesMerged.at(row);
 
@@ -351,6 +306,6 @@ QHash<int, QByteArray> SteamLibraryModel::roleNames() const
         { LogoUrlRole,    "logoUrl"    },
         { InstalledRole,  "installed"  },
         { SizeRole,       "sizeOnDisk" },
-        { LastPlayedRole, "lastPlayed" }
+        { LastPlayedRole, "lastPlayed" },
     };
 }

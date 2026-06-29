@@ -57,11 +57,10 @@ public:
     Q_INVOKABLE void installGame(const QString &appId);
 
     // Called from QML after Steam login completes.
-    // steamId: the 64-bit Steam ID from the login redirect URL.
-    // apiKey:  the Steam Web API key; pass empty string to use the
-    //          STEAM_API_KEY env var (set it in the .env / systemd unit).
-    Q_INVOKABLE void fetchOwnedGamesForId(const QString &steamId,
-                                          const QString &apiKey = {});
+    // steamId: the 64-bit Steam ID received from the /auth/steam/done redirect URL.
+    // The Windows backend will be queried for the full owned-games list — no API key
+    // is needed or used on the Arch machine.
+    Q_INVOKABLE void fetchOwnedGamesForId(const QString &steamId);
 
 signals:
     void loadingChanged();
@@ -70,7 +69,7 @@ signals:
     void filterModeChanged();
 
 private slots:
-    void handleOwnedGamesReply(QNetworkReply *reply);
+    void handleLibraryReply(QNetworkReply *reply);
 
 private:
     static QStringList      findLibraryRoots();
@@ -80,12 +79,11 @@ private:
 
     QList<SteamGame> m_gamesLocal;
     QList<SteamGame> m_gamesMerged;
-    bool             m_loading     = false;
-    int              m_filterMode  = InstalledOnly;
+    bool             m_loading    = false;
+    int              m_filterMode = InstalledOnly;
 
     QNetworkAccessManager m_nam;
 
     void setLoading(bool v);
     void setMergedGames(QList<SteamGame> games);
-    void fetchOwnedGames();   // uses env vars
 };
