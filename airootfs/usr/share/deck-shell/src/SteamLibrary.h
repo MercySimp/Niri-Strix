@@ -7,6 +7,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QFileSystemWatcher>
+#include <QDir>
 
 struct SteamGame {
     QString appId;
