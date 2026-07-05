@@ -358,7 +358,6 @@ ApplicationWindow {
                         id: gameTile
                         width: 184; height: 284
 
-                        // Explicitly coerce installed to bool to avoid undefined issues
                         property bool isInstalled: (installed === true)
 
                         color: GridView.isCurrentItem ? "#1e2e45" : "#1a1e28"; radius: 12
@@ -389,7 +388,6 @@ ApplicationWindow {
                             elide: Text.ElideRight; horizontalAlignment: Text.AlignHCenter
                         }
 
-                        // Download badge for uninstalled games
                         Rectangle {
                             visible: !gameTile.isInstalled
                             anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter
@@ -481,7 +479,6 @@ ApplicationWindow {
                             Rectangle {
                                 height: 32; radius: 8
                                 width: statusLabel.implicitWidth + 24
-                                // Use explicit bool coercion so the badge never shows undefined state
                                 property bool gameInstalled: libScope.selectedGame ? (libScope.selectedGame.installed === true) : false
                                 color: gameInstalled ? "#1a4a1a" : "#0d2040"
                                 border.color: gameInstalled ? "#4caf50" : "#2a7bd9"
@@ -508,11 +505,9 @@ ApplicationWindow {
                         Row {
                             spacing: 20
 
-                            // Primary action: Launch (installed) or Install (not installed)
                             Rectangle {
                                 id: actionBtn
                                 width: 260; height: 64; radius: 14
-                                // Coerce installed to bool so colors never evaluate to undefined
                                 property bool gameInstalled: libScope.selectedGame ? (libScope.selectedGame.installed === true) : false
 
                                 color: {
@@ -524,7 +519,6 @@ ApplicationWindow {
                                 border.width: activeFocus ? 2 : 0
                                 Behavior on color { ColorAnimation { duration: 120 } }
 
-                                // Ensure this button always gets focus when panel opens
                                 focus: true
                                 activeFocusOnTab: true
 
@@ -549,7 +543,7 @@ ApplicationWindow {
                                         SteamLibraryCtrl.launchGame(g.appId)
                                     } else {
                                         installToast.show(g.name || ("App " + g.appId))
-                                        SteamLibraryCtrl.installGame(g.appId, g.name)
+                                        SteamLibraryCtrl.installGame(g.appId)  // single arg — matches C++ slot
                                     }
                                     libScope.closePanel()
                                 }
@@ -557,7 +551,6 @@ ApplicationWindow {
                                 MouseArea { anchors.fill: parent; onClicked: parent.doAction() }
                             }
 
-                            // Uninstall button (only when installed)
                             Rectangle {
                                 id: uninstallBtn
                                 visible: libScope.selectedGame && (libScope.selectedGame.installed === true)
@@ -585,7 +578,6 @@ ApplicationWindow {
                                 }
                             }
 
-                            // Close
                             Rectangle {
                                 width: 120; height: 64; radius: 14
                                 color: activeFocus ? "#2a2a3a" : "#1a1a26"
