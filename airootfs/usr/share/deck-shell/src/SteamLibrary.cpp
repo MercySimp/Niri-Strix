@@ -119,13 +119,39 @@ QList<SteamGame> SteamLibraryModel::parseLibraryRoot(const QString &path)
 }
 
 // ---------------------------------------------------------------------------
+// Watch steamapps dirs so the grid auto-updates when games install/uninstall.
+// ---------------------------------------------------------------------------
+void SteamLibraryModel::watchLibraryRoots()
+{
+    // Remove old paths and re-add the current set.
+    if (!m_watcher.directories().isEmpty())
+        m_watcher.removePaths(m_watcher.directories());
+    const QStringList roots = findLibraryRoots();
+    if (!roots.isEmpty())
+        m_watcher.addPaths(roots);
+}
+
+void SteamLibraryModel::onWatchedDirChanged(const QString &path)
+{
+    Q_UNUSED(path)
+    qDebug() << "[SteamLibrary] steamapps dir changed, auto-refreshing";
+    // Re-run the full local scan + re-merge with owned list if we have one.
+    if (!m_lastSteamId.isEmpty())
+        fetchOwnedGamesForId(m_lastSteamId);
+    else
+        refresh();
+}
+
+// ---------------------------------------------------------------------------
 // Model
 // ---------------------------------------------------------------------------
 SteamLibraryModel::SteamLibraryModel(QObject *parent)
     : QAbstractListModel(parent)
 {
-    connect(&m_nam, &QNetworkAccessManager::finished,
-            this,   &SteamLibraryModel::handleLibraryReply);
+    connect(&m_nam,     &QNetworkAccessManager::finished,
+            this,       &SteamLibraryModel::handleLibraryReply);
+    connect(&m_watcher, &QFileSystemWatcher::directoryChanged,
+            this,       &SteamLibraryModel::onWatchedDirChanged);
     refresh();
 }
 
@@ -140,7 +166,6 @@ void SteamLibraryModel::setMergedGames(QList<SteamGame> games)
 {
     beginResetModel();
     m_gamesMerged = std::move(games);
-    // Recompute the cached installed count so rowCount() is O(1).
     m_installedCount = 0;
     for (const SteamGame &g : m_gamesMerged)
         if (g.installed) ++m_installedCount;
@@ -169,12 +194,14 @@ void SteamLibraryModel::refresh()
     });
     m_gamesLocal = local;
     setMergedGames(local);
+    watchLibraryRoots();   // re-arm watcher after each refresh
     setLoading(false);
 }
 
 void SteamLibraryModel::fetchOwnedGamesForId(const QString &steamId)
 {
     if (steamId.isEmpty()) return;
+    m_lastSteamId = steamId;
     setLoading(true);
 
     QUrl url(backendUrl() + QStringLiteral("/library/owned"));
@@ -206,7 +233,7 @@ void SteamLibraryModel::handleLibraryReply(QNetworkReply *reply)
     QJsonArray arr    = doc.object().value(QStringLiteral("games")).toArray();
 
     if (arr.isEmpty()) {
-        qWarning() << "[SteamLibrary] backend returned empty games array — showing local installed only";
+        qWarning() << "[SteamLibrary] backend returned empty games array";
         setMergedGames(m_gamesLocal);
         setLoading(false);
         return;
@@ -248,32 +275,41 @@ void SteamLibraryModel::handleLibraryReply(QNetworkReply *reply)
 
 void SteamLibraryModel::launchGame(const QString &appId)
 {
-    QProcess::startDetached("steam", {"-applaunch", appId});
+    QProcess::startDetached(QStringLiteral("steam"), { QStringLiteral("-applaunch"), appId });
 }
 
 void SteamLibraryModel::installGame(const QString &appId)
 {
-    QProcess::startDetached("steam", {QStringLiteral("steam://store/%1").arg(appId)});
+    // Look up the name for the toast signal before launching.
+    QString name;
+    for (const SteamGame &g : m_gamesMerged)
+        if (g.appId == appId) { name = g.name; break; }
+
+    // steam://install/{appId} opens Steam's install dialog directly.
+    QProcess::startDetached(QStringLiteral("steam"),
+        { QStringLiteral("steam://install/") + appId });
+    emit installRequested(appId, name);
 }
 
-// rowCount() is now O(1) — m_installedCount is kept in sync by setMergedGames().
+void SteamLibraryModel::uninstallGame(const QString &appId)
+{
+    QProcess::startDetached(QStringLiteral("steam"),
+        { QStringLiteral("steam://uninstall/") + appId });
+}
+
 int SteamLibraryModel::rowCount(const QModelIndex &parent) const
 {
     if (parent.isValid()) return 0;
     return (m_filterMode == InstalledOnly) ? m_installedCount : m_gamesMerged.size();
 }
 
-// data() rewritten without goto to avoid undefined behaviour during model resets.
 QVariant SteamLibraryModel::data(const QModelIndex &index, int role) const
 {
     if (!index.isValid()) return {};
-
     const int row = index.row();
-
     const SteamGame *g = nullptr;
 
     if (m_filterMode == InstalledOnly) {
-        // Walk the merged list and return the Nth installed game.
         int i = 0;
         for (const SteamGame &candidate : m_gamesMerged) {
             if (candidate.installed) {
@@ -282,13 +318,11 @@ QVariant SteamLibraryModel::data(const QModelIndex &index, int role) const
             }
         }
     } else {
-        // AllOwned: direct index into m_gamesMerged.
         if (row >= 0 && row < m_gamesMerged.size())
             g = &m_gamesMerged.at(row);
     }
 
     if (!g) return {};
-
     switch (role) {
     case AppIdRole:      return g->appId;
     case NameRole:       return g->name;

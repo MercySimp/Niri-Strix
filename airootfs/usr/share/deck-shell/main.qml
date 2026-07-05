@@ -21,7 +21,6 @@ ApplicationWindow {
     property string lastFetchedId: ""
 
     function fetchIfNeeded(sid) {
-        console.log("[main] fetchIfNeeded sid:", sid, "lastFetchedId:", lastFetchedId)
         if (sid === "" || sid === lastFetchedId) return
         lastFetchedId = sid
         SteamLibraryCtrl.filterMode = 1
@@ -44,7 +43,6 @@ ApplicationWindow {
         var persona = getParam(urlStr, "persona")
         var avatar  = getParam(urlStr, "avatar")
         var sid     = getParam(urlStr, "steamid")
-        console.log("[main] handleLoginDone persona:", persona, "sid:", sid)
         if (persona !== "") {
             steamLinked  = true
             steamPersona = persona
@@ -62,7 +60,6 @@ ApplicationWindow {
         xhr.withCredentials = true
         xhr.onreadystatechange = function() {
             if (xhr.readyState !== 4) return
-            console.log("[main] pollAuthStatus status:", xhr.status, "body:", xhr.responseText.substring(0, 200))
             if (xhr.status === 200) {
                 try {
                     var data = JSON.parse(xhr.responseText)
@@ -73,7 +70,7 @@ ApplicationWindow {
                         steamId      = data.steamId  || ""
                         fetchIfNeeded(steamId)
                     }
-                } catch(e) { console.warn("[main] pollAuthStatus parse error:", e) }
+                } catch(e) { console.warn("pollAuthStatus parse error:", e) }
             }
         }
         xhr.send()
@@ -93,24 +90,69 @@ ApplicationWindow {
         SteamLibraryCtrl.refresh()
     }
 
+    // Format bytes -> human readable string
+    function formatSize(bytes) {
+        if (!bytes || bytes === 0) return ""
+        if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + " MB"
+        return (bytes / 1073741824).toFixed(2) + " GB"
+    }
+
     Component.onCompleted: {
-        console.log("[main] onCompleted. SteamLibraryCtrl.count:", SteamLibraryCtrl.count,
-                    "loading:", SteamLibraryCtrl.loading)
         pollAuthStatus()
-        // C++ model already scans local ACF files in its constructor,
-        // but call refresh() to ensure it fires countChanged after startup.
         SteamLibraryCtrl.refresh()
+    }
+
+    // ── Install toast ───────────────────────────────────────────────────────────
+    Rectangle {
+        id: installToast
+        z: 100
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: root.height     // starts offscreen below
+        width: 520; height: 64; radius: 16
+        color: "#1a3a1a"; border.color: "#4caf50"; border.width: 2
+        opacity: 0
+
+        property string gameName: ""
+
+        Text {
+            anchors.centerIn: parent
+            text: "\u2B07  Installing \u2018" + installToast.gameName + "\u2019 via Steam…"
+            color: "#4caf50"; font.pixelSize: 20; font.bold: true
+        }
+
+        function show(name) {
+            gameName = name
+            showAnim.restart()
+        }
+
+        SequentialAnimation {
+            id: showAnim
+            NumberAnimation { target: installToast; property: "y";       to: root.height - 100; duration: 280; easing.type: Easing.OutCubic }
+            NumberAnimation { target: installToast; property: "opacity"; to: 1;                 duration: 120 }
+            PauseAnimation  { duration: 3000 }
+            NumberAnimation { target: installToast; property: "opacity"; to: 0;                 duration: 200 }
+            NumberAnimation { target: installToast; property: "y";       to: root.height;       duration: 1 }
+        }
+    }
+
+    // Wire toast to C++ signal
+    Connections {
+        target: SteamLibraryCtrl
+        ignoreUnknownSignals: true
+        function onInstallRequested(appId, name) {
+            installToast.show(name || ("App " + appId))
+        }
     }
 
     Connections {
         target: Gamepad
         ignoreUnknownSignals: true
-        function onButtonA()    { stack.currentItem.activate() }
-        function onButtonB()    { stack.pop() }
-        function onButtonX()    { stack.currentItem.openDetails() }
-        function onButtonY()    { stack.currentItem.openSettings() }
-        function onLb()         { SteamLibraryCtrl.filterMode = 0 }
-        function onRb()         { SteamLibraryCtrl.filterMode = 1 }
+        function onButtonA()  { stack.currentItem.activate() }
+        function onButtonB()  { stack.pop() }
+        function onButtonX()  { stack.currentItem.openDetails() }
+        function onButtonY()  { stack.currentItem.openSettings() }
+        function onLb()       { SteamLibraryCtrl.filterMode = 0 }
+        function onRb()       { SteamLibraryCtrl.filterMode = 1 }
     }
 
     Item {
@@ -129,9 +171,7 @@ ApplicationWindow {
     Component {
         id: homePage
         FocusScope {
-            width:  parent ? parent.width  : root.width
-            height: parent ? parent.height : root.height
-            focus: true
+            width: parent ? parent.width : root.width; height: parent ? parent.height : root.height; focus: true
             Rectangle { anchors.fill: parent; color: "#14161a" }
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 60; spacing: 48
@@ -185,8 +225,7 @@ ApplicationWindow {
                     Layout.fillWidth: true; Layout.fillHeight: true; spacing: 16
                     Text { text: "Recently Played"; color: "#8a9bb5"; font.pixelSize: 24; font.bold: true }
                     ListView {
-                        Layout.fillWidth: true; height: 200
-                        orientation: ListView.Horizontal; spacing: 20; clip: true
+                        Layout.fillWidth: true; height: 200; orientation: ListView.Horizontal; spacing: 20; clip: true
                         model: SteamLibraryCtrl
                         delegate: Rectangle {
                             property var _lp: lastPlayed
@@ -209,15 +248,23 @@ ApplicationWindow {
     Component {
         id: libraryPage
         FocusScope {
-            width:  parent ? parent.width  : root.width
-            height: parent ? parent.height : root.height
-            focus: true
+            id: libScope
+            width: parent ? parent.width : root.width; height: parent ? parent.height : root.height; focus: true
 
-            Component.onCompleted: {
-                console.log("[main] libraryPage opened. SteamLibraryCtrl.count:",
-                            SteamLibraryCtrl.count, "loading:", SteamLibraryCtrl.loading,
-                            "filterMode:", SteamLibraryCtrl.filterMode)
-                root.fetchIfNeeded(root.steamId)
+            Component.onCompleted: root.fetchIfNeeded(root.steamId)
+
+            // ─ Game Detail Panel state
+            property var  selectedGame: null   // { appId, name, coverUrl, installed, sizeOnDisk }
+            property bool panelOpen: false
+
+            function openPanel(game) {
+                selectedGame = game
+                panelOpen    = true
+                actionBtn.forceActiveFocus()
+            }
+            function closePanel() {
+                panelOpen = false
+                gameGrid.forceActiveFocus()
             }
 
             Rectangle { anchors.fill: parent; color: "#14161a" }
@@ -251,12 +298,9 @@ ApplicationWindow {
                         Keys.onReturnPressed: refreshBtn.doRefresh()
                         MouseArea { anchors.fill: parent; onClicked: parent.doRefresh() }
                         function doRefresh() {
-                            console.log("[main] Refresh pressed. steamId:", root.steamId)
                             root.lastFetchedId = ""
-                            if (root.steamId !== "")
-                                root.fetchIfNeeded(root.steamId)
-                            else
-                                SteamLibraryCtrl.refresh()
+                            if (root.steamId !== "") root.fetchIfNeeded(root.steamId)
+                            else SteamLibraryCtrl.refresh()
                         }
                     }
                 }
@@ -302,7 +346,7 @@ ApplicationWindow {
                     color: "#8a9bb5"; font.pixelSize: 24; Layout.alignment: Qt.AlignHCenter
                 }
 
-                // ─ Game grid ─ bound directly to the C++ QAbstractListModel
+                // ─ Game grid
                 GridView {
                     id: gameGrid
                     visible: !SteamLibraryCtrl.loading && SteamLibraryCtrl.count > 0
@@ -311,11 +355,6 @@ ApplicationWindow {
                     focus: true; activeFocusOnTab: true; clip: true
                     model: SteamLibraryCtrl
                     keyNavigationEnabled: true
-
-                    onVisibleChanged:
-                        console.log("[main] gameGrid visible:", visible,
-                                    "count:", SteamLibraryCtrl.count,
-                                    "loading:", SteamLibraryCtrl.loading)
 
                     Keys.onUpPressed:    moveCurrentIndexUp()
                     Keys.onDownPressed:  moveCurrentIndexDown()
@@ -326,14 +365,8 @@ ApplicationWindow {
                         id: gameTile
                         width: 184; height: 284
 
-                        // 'var' avoids "Unable to assign [undefined] to bool"
-                        // during beginResetModel/endResetModel teardown.
                         property var _installed: installed
                         function inst() { return _installed === true }
-
-                        Component.onCompleted:
-                            console.log("[main] tile:", appId, name,
-                                        "installed role:", installed, "inst():", inst())
 
                         color: GridView.isCurrentItem ? "#1e2e45" : "#1a1e28"; radius: 12
                         border.color: GridView.isCurrentItem ? "#5ba3ff" : "#2e3540"
@@ -359,24 +392,34 @@ ApplicationWindow {
                             anchors.right: parent.right; anchors.margins: 8
                             text: name || ""
                             color: gameTile.inst() ? "white" : "#b0b8c8"
-                            font.pixelSize: 15; font.bold: GridView.isCurrentItem
+                            font.pixelSize: 14; font.bold: GridView.isCurrentItem
                             elide: Text.ElideRight; horizontalAlignment: Text.AlignHCenter
                         }
 
+                        // Download badge for uninstalled games
                         Rectangle {
                             visible: !gameTile.inst()
                             anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter
-                            width: parent.width - 16; height: 24; radius: 8
-                            color: "#1f2531"; border.color: "#2e3540"
-                            Text { anchors.centerIn: parent; text: "Not installed"; color: "#8a9bb5"; font.pixelSize: 13 }
+                            width: parent.width - 16; height: 26; radius: 8
+                            color: "#0d2a4a"; border.color: "#2a7bd9"
+                            Text { anchors.centerIn: parent; text: "\u2B07 Not Installed"; color: "#5ba3ff"; font.pixelSize: 13 }
                         }
 
-                        Keys.onReturnPressed:
-                            inst() ? SteamLibraryCtrl.launchGame(appId) : SteamLibraryCtrl.installGame(appId)
+                        // Single click / Enter -> open detail panel
+                        Keys.onReturnPressed: libScope.openPanel({
+                            appId: appId, name: name, coverUrl: coverUrl,
+                            installed: gameTile.inst(), sizeOnDisk: sizeOnDisk
+                        })
                         MouseArea {
                             anchors.fill: parent
-                            onClicked: { gameGrid.currentIndex = index; gameGrid.forceActiveFocus() }
-                            onDoubleClicked: inst() ? SteamLibraryCtrl.launchGame(appId) : SteamLibraryCtrl.installGame(appId)
+                            onClicked: {
+                                gameGrid.currentIndex = index
+                                gameGrid.forceActiveFocus()
+                                libScope.openPanel({
+                                    appId: appId, name: name, coverUrl: coverUrl,
+                                    installed: gameTile.inst(), sizeOnDisk: sizeOnDisk
+                                })
+                            }
                         }
                     }
                 }
@@ -388,19 +431,193 @@ ApplicationWindow {
                     Text { text: "\uD83C\uDFAE"; font.pixelSize: 64; anchors.horizontalCenter: parent.horizontalCenter }
                     Text { text: "No games found"; color: "#e8e8e8"; font.pixelSize: 30; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
                     Text {
-                        text: root.steamLinked
-                            ? "Make sure the backend has STEAM_API_KEY set."
-                            : "No installed games found, or sign in with Steam in Settings."
+                        text: root.steamLinked ? "Make sure the backend has STEAM_API_KEY set."
+                                               : "No installed games found, or sign in with Steam in Settings."
                         color: "#555e6e"; font.pixelSize: 20; anchors.horizontalCenter: parent.horizontalCenter
                     }
                 }
             }
 
+            // ══════════════════════════════════════════════════════════════════
+            // Game Detail Panel — slides up from the bottom
+            // ══════════════════════════════════════════════════════════════════
+            Rectangle {
+                id: detailPanel
+                visible: libScope.panelOpen && libScope.selectedGame !== null
+                z: 10
+
+                anchors.left: parent.left; anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: 380
+
+                color: "#0f1520"
+                border.color: "#2a3a55"; border.width: 1
+
+                // Slide-up entrance
+                property real targetY: libScope.panelOpen ? 0 : height
+                Behavior on y { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+                y: height   // starts hidden below
+                onVisibleChanged: if (visible) y = 0
+
+                // Dismiss on Escape / B
+                Keys.onEscapePressed: libScope.closePanel()
+                Keys.onPressed: if (event.key === Qt.Key_Back || event.key === Qt.Key_B) libScope.closePanel()
+
+                RowLayout {
+                    anchors.fill: parent; anchors.margins: 32; spacing: 36
+
+                    // Cover art
+                    Image {
+                        id: detailCover
+                        source: libScope.selectedGame ? (libScope.selectedGame.coverUrl || "") : ""
+                        width: 200; height: 300
+                        fillMode: Image.PreserveAspectFit; smooth: true; asynchronous: true
+                        Rectangle {
+                            anchors.fill: parent; color: "#1a2030"; radius: 8
+                            visible: detailCover.status !== Image.Ready
+                            Text { anchors.centerIn: parent; text: "\uD83C\uDFAE"; font.pixelSize: 64 }
+                        }
+                    }
+
+                    // Info + actions
+                    ColumnLayout {
+                        Layout.fillWidth: true; Layout.fillHeight: true; spacing: 16
+
+                        Text {
+                            text: libScope.selectedGame ? (libScope.selectedGame.name || "") : ""
+                            color: "#e8e8e8"; font.pixelSize: 34; font.bold: true
+                            elide: Text.ElideRight; Layout.fillWidth: true
+                        }
+
+                        RowLayout {
+                            spacing: 16
+                            // Installed / Not Installed badge
+                            Rectangle {
+                                height: 32; radius: 8
+                                width: statusLabel.implicitWidth + 24
+                                color: (libScope.selectedGame && libScope.selectedGame.installed) ? "#1a4a1a" : "#0d2040"
+                                border.color: (libScope.selectedGame && libScope.selectedGame.installed) ? "#4caf50" : "#2a7bd9"
+                                Text {
+                                    id: statusLabel
+                                    anchors.centerIn: parent
+                                    text: (libScope.selectedGame && libScope.selectedGame.installed)
+                                          ? "\u2714  Installed" : "\u2B07  Not Installed"
+                                    color: (libScope.selectedGame && libScope.selectedGame.installed) ? "#4caf50" : "#5ba3ff"
+                                    font.pixelSize: 16; font.bold: true
+                                }
+                            }
+                            // Size on disk (only shown if installed and size known)
+                            Text {
+                                visible: libScope.selectedGame && libScope.selectedGame.installed
+                                         && libScope.selectedGame.sizeOnDisk > 0
+                                text: root.formatSize(libScope.selectedGame ? libScope.selectedGame.sizeOnDisk : 0)
+                                color: "#8a9bb5"; font.pixelSize: 16
+                            }
+                        }
+
+                        Item { Layout.fillHeight: true }
+
+                        RowLayout {
+                            spacing: 20
+
+                            // Primary action: Launch or Install
+                            Rectangle {
+                                id: actionBtn
+                                width: 260; height: 64; radius: 14
+                                focus: true; activeFocusOnTab: true
+
+                                property bool isInstalled: libScope.selectedGame && libScope.selectedGame.installed
+
+                                color: activeFocus
+                                    ? (isInstalled ? "#1a5c22" : "#1a4a80")
+                                    : (isInstalled ? "#1b6b28" : "#1d55a0")
+                                border.color: activeFocus
+                                    ? (isInstalled ? "#4caf50" : "#5ba3ff")
+                                    : "transparent"
+                                border.width: activeFocus ? 2 : 0
+                                Behavior on color { ColorAnimation { duration: 120 } }
+
+                                Row {
+                                    anchors.centerIn: parent; spacing: 14
+                                    Text {
+                                        text: actionBtn.isInstalled ? "\u25B6" : "\u2B07"
+                                        color: "white"; font.pixelSize: 26
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    Text {
+                                        text: actionBtn.isInstalled ? "Launch" : "Install"
+                                        color: "white"; font.pixelSize: 26; font.bold: true
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                }
+
+                                function doAction() {
+                                    var g = libScope.selectedGame
+                                    if (!g) return
+                                    if (g.installed)
+                                        SteamLibraryCtrl.launchGame(g.appId)
+                                    else
+                                        SteamLibraryCtrl.installGame(g.appId)
+                                    libScope.closePanel()
+                                }
+                                Keys.onReturnPressed: doAction()
+                                MouseArea { anchors.fill: parent; onClicked: parent.doAction() }
+                            }
+
+                            // Uninstall button (only visible when installed)
+                            Rectangle {
+                                id: uninstallBtn
+                                visible: libScope.selectedGame && libScope.selectedGame.installed
+                                width: 180; height: 64; radius: 14
+                                color: activeFocus ? "#4a1010" : "#2a1010"
+                                border.color: activeFocus ? "#e74c3c" : "#552020"
+                                border.width: activeFocus ? 2 : 1
+                                activeFocusOnTab: true
+                                Behavior on color { ColorAnimation { duration: 120 } }
+                                Row {
+                                    anchors.centerIn: parent; spacing: 10
+                                    Text { text: "\uD83D\uDDD1"; font.pixelSize: 22; anchors.verticalCenter: parent.verticalCenter }
+                                    Text { text: "Uninstall"; color: "#e74c3c"; font.pixelSize: 22; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                                }
+                                Keys.onReturnPressed: {
+                                    SteamLibraryCtrl.uninstallGame(libScope.selectedGame.appId)
+                                    libScope.closePanel()
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        SteamLibraryCtrl.uninstallGame(libScope.selectedGame.appId)
+                                        libScope.closePanel()
+                                    }
+                                }
+                            }
+
+                            // Dismiss
+                            Rectangle {
+                                width: 120; height: 64; radius: 14
+                                color: activeFocus ? "#2a2a3a" : "#1a1a26"
+                                border.color: activeFocus ? "#5ba3ff" : "#2e3540"
+                                activeFocusOnTab: true
+                                Behavior on color { ColorAnimation { duration: 120 } }
+                                Text { anchors.centerIn: parent; text: "\u2715  Close"; color: "#8a9bb5"; font.pixelSize: 20 }
+                                Keys.onReturnPressed: libScope.closePanel()
+                                MouseArea { anchors.fill: parent; onClicked: libScope.closePanel() }
+                            }
+                        }
+                    }
+                }
+            }
+
             function activate() {
-                if (gameGrid.activeFocus && gameGrid.currentItem)
-                    gameGrid.currentItem.inst()
-                        ? SteamLibraryCtrl.launchGame(gameGrid.currentItem.appId)
-                        : SteamLibraryCtrl.installGame(gameGrid.currentItem.appId)
+                if (libScope.panelOpen) { actionBtn.doAction(); return }
+                if (gameGrid.activeFocus && gameGrid.currentItem) {
+                    var tile = gameGrid.currentItem
+                    libScope.openPanel({
+                        appId: tile.appId, name: tile.name,
+                        coverUrl: tile.coverUrl, installed: tile._installed === true,
+                        sizeOnDisk: tile.sizeOnDisk
+                    })
+                }
             }
             function openDetails()  {}
             function openSettings() {}
@@ -411,9 +628,7 @@ ApplicationWindow {
     Component {
         id: steamAccountPage
         FocusScope {
-            width:  parent ? parent.width  : root.width
-            height: parent ? parent.height : root.height
-            focus: true
+            width: parent ? parent.width : root.width; height: parent ? parent.height : root.height; focus: true
             Rectangle { anchors.fill: parent; color: "#14161a" }
             WebEngineView {
                 id: loginWebView
@@ -435,8 +650,7 @@ ApplicationWindow {
                 anchors.fill: parent; anchors.margins: 60; spacing: 32; visible: !loginWebView.visible
                 RowLayout {
                     Rectangle {
-                        width: 48; height: 48; radius: 10
-                        color: activeFocus ? "#2a7bd9" : "transparent"
+                        width: 48; height: 48; radius: 10; color: activeFocus ? "#2a7bd9" : "transparent"
                         border.color: activeFocus ? "#5ba3ff" : "transparent"; activeFocusOnTab: true
                         Text { anchors.centerIn: parent; text: "\u25C4"; color: "#5ba3ff"; font.pixelSize: 28 }
                         Keys.onReturnPressed: stack.pop()
@@ -568,7 +782,8 @@ ApplicationWindow {
                                 anchors.centerIn: parent
                                 text: root.steamLinked ? ("\u2714 " + root.steamPersona) : "Not linked"
                                 color: root.steamLinked ? "#4caf50" : "#c0392b"
-                                font.pixelSize: 16; elide: Text.ElideRight; width: parent.width - 16; horizontalAlignment: Text.AlignHCenter
+                                font.pixelSize: 16; elide: Text.ElideRight
+                                width: parent.width - 16; horizontalAlignment: Text.AlignHCenter
                             }
                         }
                         Text { text: "\u276F"; color: "#5ba3ff"; font.pixelSize: 22 }

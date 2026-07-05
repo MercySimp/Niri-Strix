@@ -6,6 +6,7 @@
 #include <QProcess>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
+#include <QFileSystemWatcher>
 
 struct SteamGame {
     QString appId;
@@ -20,9 +21,10 @@ struct SteamGame {
 class SteamLibraryModel : public QAbstractListModel
 {
     Q_OBJECT
-    Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged)
-    Q_PROPERTY(int  count   READ rowCount NOTIFY countChanged)
-    Q_PROPERTY(int  filterMode READ filterMode WRITE setFilterMode NOTIFY filterModeChanged)
+    Q_PROPERTY(bool    loading    READ loading    NOTIFY loadingChanged)
+    Q_PROPERTY(int     count      READ rowCount   NOTIFY countChanged)
+    Q_PROPERTY(int     filterMode READ filterMode WRITE setFilterMode NOTIFY filterModeChanged)
+    Q_PROPERTY(QString homePath   READ homePath   CONSTANT)
 
 public:
     enum Roles {
@@ -47,14 +49,16 @@ public:
     QVariant data(const QModelIndex &index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
 
-    bool loading() const { return m_loading; }
+    bool    loading()    const { return m_loading; }
+    int     filterMode() const { return m_filterMode; }
+    QString homePath()   const { return QDir::homePath(); }
 
-    int  filterMode() const { return m_filterMode; }
     void setFilterMode(int mode);
 
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void launchGame(const QString &appId);
     Q_INVOKABLE void installGame(const QString &appId);
+    Q_INVOKABLE void uninstallGame(const QString &appId);
     Q_INVOKABLE void fetchOwnedGamesForId(const QString &steamId);
 
 signals:
@@ -62,9 +66,12 @@ signals:
     void countChanged();
     void errorOccurred(const QString &message);
     void filterModeChanged();
+    // Emitted when installGame() is called so QML can show a toast.
+    void installRequested(const QString &appId, const QString &name);
 
 private slots:
     void handleLibraryReply(QNetworkReply *reply);
+    void onWatchedDirChanged(const QString &path);
 
 private:
     static QStringList      findLibraryRoots();
@@ -72,14 +79,18 @@ private:
     static SteamGame        parseAppManifest(const QString &acfPath);
     static QString          steamBasePath();
 
+    void watchLibraryRoots();
+
     QList<SteamGame> m_gamesLocal;
     QList<SteamGame> m_gamesMerged;
-    bool             m_loading       = false;
-    int              m_filterMode    = AllOwned;
-    // Cached count of installed games — avoids O(n) scan in rowCount().
+    bool             m_loading        = false;
+    int              m_filterMode     = InstalledOnly;
     int              m_installedCount = 0;
+    // Pending steamId for re-merge after auto-refresh
+    QString          m_lastSteamId;
 
     QNetworkAccessManager m_nam;
+    QFileSystemWatcher    m_watcher;
 
     void setLoading(bool v);
     void setMergedGames(QList<SteamGame> games);
