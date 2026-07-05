@@ -137,8 +137,6 @@ ApplicationWindow {
     // ════════════════════════════════════════════════════════════════════════
     Component {
         id: homePage
-        // StackView manages the root item's geometry — do NOT use anchors.fill
-        // on the root; bind width/height to the StackView container instead.
         FocusScope {
             width:  parent ? parent.width  : root.width
             height: parent ? parent.height : root.height
@@ -161,7 +159,6 @@ ApplicationWindow {
                         Image { source: root.steamAvatar; width: 40; height: 40; fillMode: Image.PreserveAspectCrop }
                         Text {
                             text: root.steamPersona; color: "#8a9bb5"; font.pixelSize: 22
-                            // anchors.verticalCenter is valid inside a Row (not a Layout)
                             anchors.verticalCenter: parent.verticalCenter
                         }
                     }
@@ -246,7 +243,6 @@ ApplicationWindow {
                             MouseArea { anchors.fill: parent; onClicked: SteamLibraryCtrl.launchGame(appId) }
                         }
                     }
-                    // Use Layout.alignment instead of anchors inside a ColumnLayout
                     Text {
                         visible: recentList.count === 0 || SteamLibrary.loading
                         text: SteamLibrary.loading
@@ -273,8 +269,11 @@ ApplicationWindow {
             height: parent ? parent.height : root.height
             focus: true
 
+            // Only fetch if not already loading — prevents a double-fetch race
+            // where Component.onCompleted fires while a fetch from handleLoginDone
+            // is already in flight, causing loading to get stuck true.
             Component.onCompleted: {
-                if (root.steamId !== "") {
+                if (root.steamId !== "" && !SteamLibrary.loading) {
                     SteamLibrary.filterMode = 1
                     SteamLibraryCtrl.fetchOwnedGamesForId(root.steamId)
                 }
@@ -306,7 +305,6 @@ ApplicationWindow {
                     Text { text: "Library"; color: "#e8e8e8"; font.pixelSize: 44; font.bold: true }
                     Item { Layout.fillWidth: true }
 
-                    // Use Layout.alignment — this Text is a direct child of RowLayout
                     Text {
                         text: (SteamLibrary.count || 0) + " games"
                         color: "#8a9bb5"; font.pixelSize: 22
@@ -320,8 +318,13 @@ ApplicationWindow {
                         border.color: activeFocus ? "#5ba3ff" : "#2e3540"
                         activeFocusOnTab: true
                         Text { anchors.centerIn: parent; text: "\u21BA  Refresh"; color: "#8a9bb5"; font.pixelSize: 18 }
-                        Keys.onReturnPressed: doRefresh()
-                        MouseArea { anchors.fill: parent; onClicked: doRefresh() }
+                        // Keys handler on the Rectangle itself — can call the function directly
+                        Keys.onReturnPressed: refreshBtn.doRefresh()
+                        MouseArea {
+                            anchors.fill: parent
+                            // MouseArea is a child — must use parent.doRefresh()
+                            onClicked: parent.doRefresh()
+                        }
                         function doRefresh() {
                             if (root.steamId !== "")
                                 SteamLibraryCtrl.fetchOwnedGamesForId(root.steamId)
@@ -387,7 +390,7 @@ ApplicationWindow {
                     Item { Layout.fillWidth: true }
                 }
 
-                // ── Loading spinner text ─────────────────────────────────────
+                // ── Loading text ──────────────────────────────────────────────
                 Text {
                     visible: SteamLibrary.loading
                     text: "Fetching Steam library\u2026"
@@ -428,8 +431,9 @@ ApplicationWindow {
                     delegate: Rectangle {
                         id: gameTile
                         width: 184; height: 284
-                        // Guard 'installed' against undefined during model resets
-                        property bool isInstalled: (installed === true)
+                        // Coerce installed to bool — avoids "Unable to assign [undefined] to bool"
+                        // that fires during beginResetModel/endResetModel when roles are momentarily null.
+                        property bool isInstalled: installed === true
                         color: GridView.isCurrentItem ? "#1e2e45" : "#1a1e28"
                         radius: 12
                         border.color: GridView.isCurrentItem ? "#5ba3ff" : "#2e3540"
@@ -500,7 +504,7 @@ ApplicationWindow {
                     Text { text: "No games found"; color: "#e8e8e8"; font.pixelSize: 30; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
                     Text {
                         text: root.steamLinked
-                            ? (root.steamId !== "" ? "Make sure STEAM_API_KEY is set on this machine." : "Install a game from the Store.")
+                            ? (root.steamId !== "" ? "Make sure the backend has your STEAM_API_KEY set." : "Install a game from the Store.")
                             : "Sign in with Steam in Settings to see your full library."
                         color: "#555e6e"; font.pixelSize: 20
                         anchors.horizontalCenter: parent.horizontalCenter
@@ -509,7 +513,7 @@ ApplicationWindow {
             }
 
             function activate() {
-                if (gameGrid.currentItem) {
+                if (gameGrid.activeFocus && gameGrid.currentItem) {
                     if (gameGrid.currentItem.isInstalled)
                         SteamLibraryCtrl.launchGame(gameGrid.currentItem.appId)
                     else

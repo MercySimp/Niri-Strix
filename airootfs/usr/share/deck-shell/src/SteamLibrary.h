@@ -55,11 +55,6 @@ public:
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void launchGame(const QString &appId);
     Q_INVOKABLE void installGame(const QString &appId);
-
-    // Called from QML after Steam login completes.
-    // steamId: the 64-bit Steam ID received from the /auth/steam/done redirect URL.
-    // The Windows backend will be queried for the full owned-games list — no API key
-    // is needed or used on the Arch machine.
     Q_INVOKABLE void fetchOwnedGamesForId(const QString &steamId);
 
 signals:
@@ -79,10 +74,10 @@ private:
 
     QList<SteamGame> m_gamesLocal;
     QList<SteamGame> m_gamesMerged;
-    bool             m_loading    = false;
-    // Default to AllOwned so the library grid is populated immediately after
-    // sign-in, even on machines where Steam is not locally installed.
-    int              m_filterMode = AllOwned;
+    bool             m_loading       = false;
+    int              m_filterMode    = AllOwned;
+    // Cached count of installed games — avoids O(n) scan in rowCount().
+    int              m_installedCount = 0;
 
     QNetworkAccessManager m_nam;
 

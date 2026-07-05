@@ -14,8 +14,6 @@
 #include <QDebug>
 #include <algorithm>
 
-// The Windows backend URL — all Steam API calls are made server-side.
-// Override at runtime by setting DECK_BACKEND_URL in the environment.
 static QString backendUrl()
 {
     QByteArray env = qgetenv("DECK_BACKEND_URL");
@@ -40,7 +38,7 @@ static QString vdfValue(const QStringList &lines, const QString &key)
 }
 
 // ---------------------------------------------------------------------------
-// Local Steam library scanning (installed games only)
+// Local Steam library scanning
 // ---------------------------------------------------------------------------
 QString SteamLibraryModel::steamBasePath()
 {
@@ -128,7 +126,7 @@ SteamLibraryModel::SteamLibraryModel(QObject *parent)
 {
     connect(&m_nam, &QNetworkAccessManager::finished,
             this,   &SteamLibraryModel::handleLibraryReply);
-    refresh();   // load local installed games at startup
+    refresh();
 }
 
 void SteamLibraryModel::setLoading(bool v)
@@ -142,6 +140,10 @@ void SteamLibraryModel::setMergedGames(QList<SteamGame> games)
 {
     beginResetModel();
     m_gamesMerged = std::move(games);
+    // Recompute the cached installed count so rowCount() is O(1).
+    m_installedCount = 0;
+    for (const SteamGame &g : m_gamesMerged)
+        if (g.installed) ++m_installedCount;
     endResetModel();
     emit countChanged();
 }
@@ -150,15 +152,12 @@ void SteamLibraryModel::setFilterMode(int mode)
 {
     if (mode == m_filterMode) return;
     m_filterMode = mode;
-    // beginResetModel/endResetModel forces the GridView to re-query rowCount()
-    // and data(), so the visible set updates immediately when the filter changes.
     beginResetModel();
     endResetModel();
     emit filterModeChanged();
     emit countChanged();
 }
 
-// Scan local .acf manifests — no network needed.
 void SteamLibraryModel::refresh()
 {
     setLoading(true);
@@ -169,12 +168,10 @@ void SteamLibraryModel::refresh()
         return a.name.toLower() < b.name.toLower();
     });
     m_gamesLocal = local;
-    setMergedGames(local);   // show installed games while we wait for sign-in
+    setMergedGames(local);
     setLoading(false);
 }
 
-// Ask the Windows backend for the full owned-games list.
-// The backend holds the Steam API key — Arch never needs one.
 void SteamLibraryModel::fetchOwnedGamesForId(const QString &steamId)
 {
     if (steamId.isEmpty()) return;
@@ -190,14 +187,13 @@ void SteamLibraryModel::fetchOwnedGamesForId(const QString &steamId)
     m_nam.get(req);
 }
 
-// Handle the JSON response from GET /library/owned
 void SteamLibraryModel::handleLibraryReply(QNetworkReply *reply)
 {
     reply->deleteLater();
 
     if (reply->error() != QNetworkReply::NoError) {
         qWarning() << "[SteamLibrary] backend error:" << reply->errorString();
-        setMergedGames(m_gamesLocal);   // fall back to installed-only
+        setMergedGames(m_gamesLocal);
         setLoading(false);
         emit errorOccurred(QStringLiteral("Could not reach backend: %1").arg(reply->errorString()));
         return;
@@ -216,7 +212,6 @@ void SteamLibraryModel::handleLibraryReply(QNetworkReply *reply)
         return;
     }
 
-    // Build a lookup of locally-installed games so we can tag them
     QHash<QString, SteamGame> localById;
     for (const SteamGame &g : m_gamesLocal)
         localById.insert(g.appId, g);
@@ -231,7 +226,7 @@ void SteamLibraryModel::handleLibraryReply(QNetworkReply *reply)
 
         SteamGame g;
         if (localById.contains(id)) {
-            g = localById.value(id);   // keep local metadata (size, lastPlayed)
+            g = localById.value(id);
         } else {
             g.appId     = id;
             g.name      = nm;
@@ -261,44 +256,47 @@ void SteamLibraryModel::installGame(const QString &appId)
     QProcess::startDetached("steam", {QStringLiteral("steam://store/%1").arg(appId)});
 }
 
+// rowCount() is now O(1) — m_installedCount is kept in sync by setMergedGames().
 int SteamLibraryModel::rowCount(const QModelIndex &parent) const
 {
     if (parent.isValid()) return 0;
-    if (m_filterMode == InstalledOnly) {
-        int n = 0;
-        for (const SteamGame &g : m_gamesMerged) if (g.installed) ++n;
-        return n;
-    }
-    return m_gamesMerged.size();
+    return (m_filterMode == InstalledOnly) ? m_installedCount : m_gamesMerged.size();
 }
 
+// data() rewritten without goto to avoid undefined behaviour during model resets.
 QVariant SteamLibraryModel::data(const QModelIndex &index, int role) const
 {
     if (!index.isValid()) return {};
 
-    int row = index.row();
+    const int row = index.row();
+
+    const SteamGame *g = nullptr;
+
     if (m_filterMode == InstalledOnly) {
+        // Walk the merged list and return the Nth installed game.
         int i = 0;
-        for (int k = 0; k < m_gamesMerged.size(); ++k) {
-            if (m_gamesMerged[k].installed) {
-                if (i == row) { row = k; goto found; }
+        for (const SteamGame &candidate : m_gamesMerged) {
+            if (candidate.installed) {
+                if (i == row) { g = &candidate; break; }
                 ++i;
             }
         }
-        return {};
+    } else {
+        // AllOwned: direct index into m_gamesMerged.
+        if (row >= 0 && row < m_gamesMerged.size())
+            g = &m_gamesMerged.at(row);
     }
-    found:
-    if (row < 0 || row >= m_gamesMerged.size()) return {};
-    const SteamGame &g = m_gamesMerged.at(row);
+
+    if (!g) return {};
 
     switch (role) {
-    case AppIdRole:      return g.appId;
-    case NameRole:       return g.name;
-    case CoverUrlRole:   return g.coverUrl;
-    case LogoUrlRole:    return g.logoUrl;
-    case InstalledRole:  return g.installed;
-    case SizeRole:       return g.sizeOnDisk;
-    case LastPlayedRole: return g.lastPlayed;
+    case AppIdRole:      return g->appId;
+    case NameRole:       return g->name;
+    case CoverUrlRole:   return g->coverUrl;
+    case LogoUrlRole:    return g->logoUrl;
+    case InstalledRole:  return g->installed;
+    case SizeRole:       return g->sizeOnDisk;
+    case LastPlayedRole: return g->lastPlayed;
     }
     return {};
 }
