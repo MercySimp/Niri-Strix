@@ -1,0 +1,14 @@
+[Unit]
+Description=Auto-confirm Steam install dialogs for deck-shell
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/share/deck-shell/steam-install-confirm.sh
+Restart=on-failure
+RestartSec=2s
+Environment=DISPLAY=:0
+
+[Install]
+WantedBy=graphical-session.target

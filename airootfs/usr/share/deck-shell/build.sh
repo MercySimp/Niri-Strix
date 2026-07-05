@@ -1,22 +1,21 @@
-#!/bin/bash
-# Quick build script for the Deck Shell on Arch
-# Dependencies: qt6-base qt6-declarative sdl2 cmake make
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
 
-set -e
+echo "[build] Configuring..."
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
 
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD="$DIR/build"
+echo "[build] Compiling..."
+cmake --build build --parallel
 
-echo "==> Installing build dependencies..."
-sudo pacman -S --needed --noconfirm qt6-base qt6-declarative sdl2 cmake make gcc
+echo "[build] Installing binary..."
+sudo cmake --install build
 
-echo "==> Configuring..."
-cmake -S "$DIR" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release
+echo "[build] Installing watcher script..."
+sudo install -Dm755 steam-install-confirm.sh /usr/share/deck-shell/steam-install-confirm.sh
 
-echo "==> Building..."
-cmake --build "$BUILD" --parallel
+echo "[build] Enabling systemd user service..."
+systemctl --user daemon-reload
+systemctl --user enable --now steam-install-confirm.service
 
-echo "==> Installing..."
-sudo cmake --install "$BUILD"
-
-echo "==> Done! Run: deck-shell"
+echo "[build] Done."
