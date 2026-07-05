@@ -80,7 +80,9 @@ private:
     QList<SteamGame> m_gamesLocal;
     QList<SteamGame> m_gamesMerged;
     bool             m_loading    = false;
-    int              m_filterMode = InstalledOnly;
+    // Default to AllOwned so the library grid is populated immediately after
+    // sign-in, even on machines where Steam is not locally installed.
+    int              m_filterMode = AllOwned;
 
     QNetworkAccessManager m_nam;
 
