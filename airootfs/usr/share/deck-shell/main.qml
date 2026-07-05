@@ -14,20 +14,17 @@ ApplicationWindow {
 
     readonly property string backendUrl: "https://api.accesshomeserver.uk"
 
-    property bool   steamLinked:  false
-    property string steamPersona: ""
-    property string steamAvatar:  ""
-    property string steamId:      ""
+    property bool   steamLinked:   false
+    property string steamPersona:  ""
+    property string steamAvatar:   ""
+    property string steamId:       ""
     property string lastFetchedId: ""
 
     function fetchIfNeeded(sid) {
         console.log("[main] fetchIfNeeded sid:", sid, "lastFetchedId:", lastFetchedId)
-        if (sid === "" || sid === lastFetchedId) {
-            console.log("[main] fetchIfNeeded: skipping (already fetched or no sid)")
-            return
-        }
+        if (sid === "" || sid === lastFetchedId) return
         lastFetchedId = sid
-        SteamLibrary.filterMode = 1
+        SteamLibraryCtrl.filterMode = 1
         SteamLibraryCtrl.fetchOwnedGamesForId(sid)
     }
 
@@ -60,17 +57,15 @@ ApplicationWindow {
     }
 
     function pollAuthStatus() {
-        console.log("[main] pollAuthStatus called")
         var xhr = new XMLHttpRequest()
         xhr.open("GET", backendUrl + "/auth/status", true)
         xhr.withCredentials = true
         xhr.onreadystatechange = function() {
             if (xhr.readyState !== 4) return
-            console.log("[main] pollAuthStatus response status:", xhr.status, "body:", xhr.responseText.substring(0, 200))
+            console.log("[main] pollAuthStatus status:", xhr.status, "body:", xhr.responseText.substring(0, 200))
             if (xhr.status === 200) {
                 try {
                     var data = JSON.parse(xhr.responseText)
-                    console.log("[main] pollAuthStatus parsed: linked=", data.linked, "steamId=", data.steamId)
                     if (data.linked) {
                         steamLinked  = data.linked
                         steamPersona = data.persona  || ""
@@ -94,63 +89,16 @@ ApplicationWindow {
         steamAvatar   = ""
         steamId       = ""
         lastFetchedId = ""
-        SteamLibrary.filterMode = 0
-        SteamLibrary.refresh()
-    }
-
-    // ─── C++ → QML bridge ────────────────────────────────────────────────────
-    Connections {
-        target: SteamLibraryCtrl
-        ignoreUnknownSignals: true
-
-        function onCountChanged() {
-            console.log("[main] SteamLibraryCtrl.onCountChanged fired.",
-                        "count:", SteamLibraryCtrl.count,
-                        "loading:", SteamLibraryCtrl.loading)
-            if (SteamLibraryCtrl.loading) {
-                console.log("[main] still loading, skipping bridge")
-                return
-            }
-
-            // Pass home path to QML singleton for ACF file checks
-            var hp = SteamLibraryCtrl.homePath
-            console.log("[main] SteamLibraryCtrl.homePath:", hp)
-            SteamLibrary.setHomePath(hp || "")
-
-            var games = []
-            var n = SteamLibraryCtrl.count
-            console.log("[main] reading", n, "games from C++ model")
-            for (var i = 0; i < n; i++) {
-                var idx = SteamLibraryCtrl.index(i, 0)
-                var game = {
-                    appId:      SteamLibraryCtrl.data(idx, 0x101),  // AppIdRole
-                    name:       SteamLibraryCtrl.data(idx, 0x102),  // NameRole
-                    coverUrl:   SteamLibraryCtrl.data(idx, 0x103),  // CoverUrlRole
-                    installed:  SteamLibraryCtrl.data(idx, 0x105),  // InstalledRole
-                    lastPlayed: SteamLibraryCtrl.data(idx, 0x107)   // LastPlayedRole
-                }
-                console.log("[main]   game[", i, "]:", game.appId, game.name, "installed:", game.installed)
-                games.push(game)
-            }
-
-            if (root.steamLinked && root.steamId !== "") {
-                console.log("[main] bridge -> loadOwnedGames (", games.length, "games)")
-                SteamLibrary.loadOwnedGames(games)
-            } else {
-                console.log("[main] bridge -> setLocalGames (", games.length, "games)")
-                SteamLibrary.setLocalGames(games)
-            }
-        }
-
-        function onLoadingChanged() {
-            console.log("[main] SteamLibraryCtrl.onLoadingChanged: loading=", SteamLibraryCtrl.loading)
-            SteamLibrary.loading = SteamLibraryCtrl.loading
-        }
+        SteamLibraryCtrl.filterMode = 0
+        SteamLibraryCtrl.refresh()
     }
 
     Component.onCompleted: {
-        console.log("[main] Component.onCompleted")
+        console.log("[main] onCompleted. SteamLibraryCtrl.count:", SteamLibraryCtrl.count,
+                    "loading:", SteamLibraryCtrl.loading)
         pollAuthStatus()
+        // C++ model already scans local ACF files in its constructor,
+        // but call refresh() to ensure it fires countChanged after startup.
         SteamLibraryCtrl.refresh()
     }
 
@@ -159,22 +107,16 @@ ApplicationWindow {
         ignoreUnknownSignals: true
         function onButtonA()    { stack.currentItem.activate() }
         function onButtonB()    { stack.pop() }
-        function onLb()         { SteamLibrary.filterMode = 0 }
-        function onRb()         { SteamLibrary.filterMode = 1 }
+        function onButtonX()    { stack.currentItem.openDetails() }
+        function onButtonY()    { stack.currentItem.openSettings() }
+        function onLb()         { SteamLibraryCtrl.filterMode = 0 }
+        function onRb()         { SteamLibraryCtrl.filterMode = 1 }
     }
 
     Item {
         anchors.fill: parent; focus: true
         Keys.onReturnPressed: stack.currentItem.activate()
         Keys.onEscapePressed: stack.pop()
-    }
-
-    QtObject {
-        id: navigator
-        function moveUp()    { root.activeFocusItem.nextItemInFocusChain(false).forceActiveFocus() }
-        function moveDown()  { root.activeFocusItem.nextItemInFocusChain(true).forceActiveFocus() }
-        function moveLeft()  { root.activeFocusItem.nextItemInFocusChain(false).forceActiveFocus() }
-        function moveRight() { root.activeFocusItem.nextItemInFocusChain(true).forceActiveFocus() }
     }
 
     StackView {
@@ -245,13 +187,14 @@ ApplicationWindow {
                     ListView {
                         Layout.fillWidth: true; height: 200
                         orientation: ListView.Horizontal; spacing: 20; clip: true
-                        model: SteamLibrary
+                        model: SteamLibraryCtrl
                         delegate: Rectangle {
-                            visible: (lastPlayed || "") !== "" && lastPlayed !== "0"
+                            property var _lp: lastPlayed
+                            visible: (_lp || "") !== "" && _lp !== "0"
                             width: visible ? 160 : 0; height: 190
                             color: "#1a2030"; radius: 10; clip: true
                             Image { anchors.fill: parent; source: coverUrl || ""; fillMode: Image.PreserveAspectCrop }
-                            MouseArea { anchors.fill: parent; onClicked: SteamLibrary.launchGame(appId) }
+                            MouseArea { anchors.fill: parent; onClicked: SteamLibraryCtrl.launchGame(appId) }
                         }
                     }
                 }
@@ -271,8 +214,9 @@ ApplicationWindow {
             focus: true
 
             Component.onCompleted: {
-                console.log("[main] libraryPage.onCompleted. SteamLibrary.count:",
-                            SteamLibrary.count, "loading:", SteamLibrary.loading)
+                console.log("[main] libraryPage opened. SteamLibraryCtrl.count:",
+                            SteamLibraryCtrl.count, "loading:", SteamLibraryCtrl.loading,
+                            "filterMode:", SteamLibraryCtrl.filterMode)
                 root.fetchIfNeeded(root.steamId)
             }
 
@@ -281,6 +225,7 @@ ApplicationWindow {
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 48; spacing: 20
 
+                // ─ Header
                 RowLayout {
                     spacing: 20; Layout.fillWidth: true
                     Rectangle {
@@ -294,7 +239,7 @@ ApplicationWindow {
                     Text { text: "Library"; color: "#e8e8e8"; font.pixelSize: 44; font.bold: true }
                     Item { Layout.fillWidth: true }
                     Text {
-                        text: SteamLibrary.count + " games"
+                        text: SteamLibraryCtrl.count + " games"
                         color: "#8a9bb5"; font.pixelSize: 22; Layout.alignment: Qt.AlignVCenter
                     }
                     Rectangle {
@@ -306,14 +251,17 @@ ApplicationWindow {
                         Keys.onReturnPressed: refreshBtn.doRefresh()
                         MouseArea { anchors.fill: parent; onClicked: parent.doRefresh() }
                         function doRefresh() {
-                            console.log("[main] Refresh button pressed")
+                            console.log("[main] Refresh pressed. steamId:", root.steamId)
                             root.lastFetchedId = ""
-                            if (root.steamId !== "") root.fetchIfNeeded(root.steamId)
-                            else { SteamLibraryCtrl.refresh(); SteamLibrary.refresh() }
+                            if (root.steamId !== "")
+                                root.fetchIfNeeded(root.steamId)
+                            else
+                                SteamLibraryCtrl.refresh()
                         }
                     }
                 }
 
+                // ─ Filter tabs
                 RowLayout {
                     spacing: 8; Layout.fillWidth: true
                     Repeater {
@@ -321,7 +269,7 @@ ApplicationWindow {
                         model: ["Installed", "All Owned"]
                         delegate: Rectangle {
                             id: filterTab
-                            property bool active: (index === SteamLibrary.filterMode)
+                            property bool active: (index === SteamLibraryCtrl.filterMode)
                             Layout.preferredWidth: 200; height: 48
                             color: active ? "#2a7bd9" : (activeFocus ? "#263550" : "#1f2531"); radius: 10
                             border.color: (active || activeFocus) ? "#5ba3ff" : "#2e3540"
@@ -335,42 +283,42 @@ ApplicationWindow {
                                 Text { text: index === 0 ? "LB" : "RB"; color: active ? "white" : "#555e6e"; font.pixelSize: 14; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                                 Text { text: modelData; color: active ? "white" : "#8a9bb5"; font.pixelSize: 20; font.bold: active; anchors.verticalCenter: parent.verticalCenter }
                             }
-                            Keys.onReturnPressed: {
-                                console.log("[main] filter tab pressed, index:", index)
-                                SteamLibrary.filterMode = index
-                            }
-                            MouseArea { anchors.fill: parent; onClicked: { filterTab.forceActiveFocus(); SteamLibrary.filterMode = index } }
+                            Keys.onReturnPressed: SteamLibraryCtrl.filterMode = index
+                            MouseArea { anchors.fill: parent; onClicked: { filterTab.forceActiveFocus(); SteamLibraryCtrl.filterMode = index } }
                         }
+                    }
+                    Text {
+                        visible: SteamLibraryCtrl.filterMode === 1 && !root.steamLinked
+                        text: "\u26A0  Sign in with Steam in Settings to see your full library"
+                        color: "#da7101"; font.pixelSize: 18; Layout.alignment: Qt.AlignVCenter
                     }
                     Item { Layout.fillWidth: true }
                 }
 
-                // Loading indicator
+                // ─ Loading
                 Text {
-                    visible: SteamLibrary.loading
+                    visible: SteamLibraryCtrl.loading
                     text: "Fetching Steam library\u2026"
                     color: "#8a9bb5"; font.pixelSize: 24; Layout.alignment: Qt.AlignHCenter
                 }
 
-                // ── The grid ──────────────────────────────────────────────────
+                // ─ Game grid ─ bound directly to the C++ QAbstractListModel
                 GridView {
                     id: gameGrid
-                    // Log why the grid is visible or not
-                    property bool shouldBeVisible: !SteamLibrary.loading && SteamLibrary.count > 0
-                    visible: shouldBeVisible
-                    onShouldBeVisibleChanged:
-                        console.log("[main] gameGrid visible:", shouldBeVisible,
-                                    "loading:", SteamLibrary.loading,
-                                    "count:", SteamLibrary.count)
-
+                    visible: !SteamLibraryCtrl.loading && SteamLibraryCtrl.count > 0
                     Layout.fillWidth: true; Layout.fillHeight: true
                     cellWidth: 200; cellHeight: 300
                     focus: true; activeFocusOnTab: true; clip: true
-                    model: SteamLibrary
+                    model: SteamLibraryCtrl
                     keyNavigationEnabled: true
 
-                    Keys.onUpPressed:   moveCurrentIndexUp()
-                    Keys.onDownPressed: moveCurrentIndexDown()
+                    onVisibleChanged:
+                        console.log("[main] gameGrid visible:", visible,
+                                    "count:", SteamLibraryCtrl.count,
+                                    "loading:", SteamLibraryCtrl.loading)
+
+                    Keys.onUpPressed:    moveCurrentIndexUp()
+                    Keys.onDownPressed:  moveCurrentIndexDown()
                     Keys.onLeftPressed:  moveCurrentIndexLeft()
                     Keys.onRightPressed: moveCurrentIndexRight()
 
@@ -378,16 +326,14 @@ ApplicationWindow {
                         id: gameTile
                         width: 184; height: 284
 
-                        // Use 'var' — typed 'bool' throws when model resets
-                        // and the role resolves to undefined mid-teardown.
+                        // 'var' avoids "Unable to assign [undefined] to bool"
+                        // during beginResetModel/endResetModel teardown.
                         property var _installed: installed
                         function inst() { return _installed === true }
 
                         Component.onCompleted:
-                            console.log("[main] delegate created: appId=", appId,
-                                        "name=", name,
-                                        "raw installed role value:", installed,
-                                        "inst():", inst())
+                            console.log("[main] tile:", appId, name,
+                                        "installed role:", installed, "inst():", inst())
 
                         color: GridView.isCurrentItem ? "#1e2e45" : "#1a1e28"; radius: 12
                         border.color: GridView.isCurrentItem ? "#5ba3ff" : "#2e3540"
@@ -426,18 +372,18 @@ ApplicationWindow {
                         }
 
                         Keys.onReturnPressed:
-                            inst() ? SteamLibrary.launchGame(appId) : SteamLibrary.installGame(appId)
+                            inst() ? SteamLibraryCtrl.launchGame(appId) : SteamLibraryCtrl.installGame(appId)
                         MouseArea {
                             anchors.fill: parent
                             onClicked: { gameGrid.currentIndex = index; gameGrid.forceActiveFocus() }
-                            onDoubleClicked: inst() ? SteamLibrary.launchGame(appId) : SteamLibrary.installGame(appId)
+                            onDoubleClicked: inst() ? SteamLibraryCtrl.launchGame(appId) : SteamLibraryCtrl.installGame(appId)
                         }
                     }
                 }
 
-                // Empty state
+                // ─ Empty state
                 Column {
-                    visible: !SteamLibrary.loading && SteamLibrary.count === 0
+                    visible: !SteamLibraryCtrl.loading && SteamLibraryCtrl.count === 0
                     Layout.alignment: Qt.AlignHCenter; spacing: 16
                     Text { text: "\uD83C\uDFAE"; font.pixelSize: 64; anchors.horizontalCenter: parent.horizontalCenter }
                     Text { text: "No games found"; color: "#e8e8e8"; font.pixelSize: 30; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
@@ -453,8 +399,8 @@ ApplicationWindow {
             function activate() {
                 if (gameGrid.activeFocus && gameGrid.currentItem)
                     gameGrid.currentItem.inst()
-                        ? SteamLibrary.launchGame(gameGrid.currentItem.appId)
-                        : SteamLibrary.installGame(gameGrid.currentItem.appId)
+                        ? SteamLibraryCtrl.launchGame(gameGrid.currentItem.appId)
+                        : SteamLibraryCtrl.installGame(gameGrid.currentItem.appId)
             }
             function openDetails()  {}
             function openSettings() {}
@@ -479,6 +425,11 @@ ApplicationWindow {
                         root.handleLoginDone(u)
                     }
                 }
+                onLoadingChanged: function(info) {
+                    if (info.status === WebEngineView.LoadFailedStatus) {
+                        loginErrText.visible = true; visible = false
+                    }
+                }
             }
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 60; spacing: 32; visible: !loginWebView.visible
@@ -492,6 +443,11 @@ ApplicationWindow {
                         MouseArea { anchors.fill: parent; onClicked: stack.pop() }
                     }
                     Text { text: "Steam Account"; color: "#e8e8e8"; font.pixelSize: 44; font.bold: true }
+                }
+                Rectangle {
+                    id: loginErrText; visible: false
+                    Layout.fillWidth: true; height: 56; color: "#2a1a1a"; radius: 10; border.color: "#c0392b"
+                    Text { anchors.centerIn: parent; text: "\u26A0  Could not reach the login server."; color: "#e74c3c"; font.pixelSize: 18 }
                 }
                 ColumnLayout {
                     visible: root.steamLinked; spacing: 20
@@ -509,6 +465,7 @@ ApplicationWindow {
                         color: activeFocus ? "#c0392b" : "#1f2531"
                         border.color: activeFocus ? "#e74c3c" : "#2e3540"; border.width: activeFocus ? 3 : 1
                         focus: root.steamLinked; activeFocusOnTab: true
+                        Behavior on color { ColorAnimation { duration: 120 } }
                         Text { anchors.centerIn: parent; text: "Sign Out"; color: "white"; font.pixelSize: 22; font.bold: true }
                         Keys.onReturnPressed: root.doLogout()
                         MouseArea { anchors.fill: parent; onClicked: root.doLogout() }
@@ -527,6 +484,7 @@ ApplicationWindow {
                         }
                         border.color: activeFocus ? "#5ba3ff" : "#1779a8"; border.width: activeFocus ? 3 : 1
                         focus: !root.steamLinked; activeFocusOnTab: true
+                        Behavior on border.color { ColorAnimation { duration: 120 } }
                         Row {
                             anchors.centerIn: parent; spacing: 14
                             Text { text: "\uD83C\uDFAE"; font.pixelSize: 30; anchors.verticalCenter: parent.verticalCenter }
@@ -535,10 +493,12 @@ ApplicationWindow {
                         Keys.onReturnPressed: openSteamLogin()
                         MouseArea { anchors.fill: parent; onClicked: parent.openSteamLogin() }
                         function openSteamLogin() {
+                            loginErrText.visible = false
                             loginWebView.url = root.backendUrl + "/auth/steam"
                             loginWebView.visible = true; loginWebView.forceActiveFocus()
                         }
                     }
+                    Text { text: "Your credentials are entered directly on Steam's website."; color: "#555e6e"; font.pixelSize: 16; wrapMode: Text.WordWrap; Layout.maximumWidth: 780 }
                 }
             }
             function activate() { var item = root.activeFocusItem; if (item && item.openSteamLogin) item.openSteamLogin() }
@@ -595,11 +555,22 @@ ApplicationWindow {
                 Rectangle {
                     Layout.fillWidth: true; height: 80; color: activeFocus ? "#1f2e42" : "#191d26"; radius: 10
                     border.color: activeFocus ? "#5ba3ff" : "#2e3540"; focus: true; activeFocusOnTab: true
+                    Behavior on color { ColorAnimation { duration: 120 } }
                     RowLayout {
                         anchors.fill: parent; anchors.leftMargin: 28; anchors.rightMargin: 28
                         Text { text: "Steam Account"; color: "white"; font.pixelSize: 24 }
                         Item { Layout.fillWidth: true }
-                        Text { text: root.steamLinked ? ("\u2714 " + root.steamPersona) : "Not linked"; color: root.steamLinked ? "#4caf50" : "#c0392b"; font.pixelSize: 16 }
+                        Rectangle {
+                            width: 160; height: 36; radius: 8
+                            color: root.steamLinked ? "#1a4a1a" : "#2a1a1a"
+                            border.color: root.steamLinked ? "#4caf50" : "#c0392b"
+                            Text {
+                                anchors.centerIn: parent
+                                text: root.steamLinked ? ("\u2714 " + root.steamPersona) : "Not linked"
+                                color: root.steamLinked ? "#4caf50" : "#c0392b"
+                                font.pixelSize: 16; elide: Text.ElideRight; width: parent.width - 16; horizontalAlignment: Text.AlignHCenter
+                            }
+                        }
                         Text { text: "\u276F"; color: "#5ba3ff"; font.pixelSize: 22 }
                     }
                     Keys.onReturnPressed: stack.push(steamAccountPage)
@@ -645,6 +616,7 @@ ApplicationWindow {
                             focus: index === 0; activeFocusOnTab: true
                             KeyNavigation.right: powerRepeater.itemAt(index + 1)
                             KeyNavigation.left:  powerRepeater.itemAt(index - 1)
+                            Behavior on color { ColorAnimation { duration: 120 } }
                             Text { anchors.centerIn: parent; text: modelData.label; color: "white"; font.pixelSize: 22; font.bold: activeFocus }
                             Keys.onReturnPressed: doAction()
                             MouseArea { anchors.fill: parent; onClicked: { powerBtn.forceActiveFocus(); powerBtn.doAction() } }
