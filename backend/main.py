@@ -10,7 +10,7 @@ POST /auth/logout         → clear session
 GET  /library/owned       → {games: [{appId, name, coverUrl, playtimeForever}]}
                             Accepts optional ?steamid=XXXXX query param so the
                             QML shell can fetch without relying on session cookies.
-POST /library/install     → {appId: "XXXXX"} → triggers Steam client install
+POST /library/install     → {appId: "XXXXX"} → silent install via steamcmd
 POST /system/power        → {action: shutdown|reboot|suspend}
 """
 
@@ -33,6 +33,8 @@ from starlette.middleware.sessions import SessionMiddleware
 SECRET_KEY    = os.environ.get("DECK_SECRET", "change_me_in_production")
 STEAM_API_KEY = os.environ.get("STEAM_API_KEY", "")
 BACKEND_URL   = os.environ.get("BACKEND_URL", "https://api.accesshomeserver.uk")
+STEAM_USER    = os.environ.get("STEAM_USER", "")
+STEAM_PASS    = os.environ.get("STEAM_PASS", "")
 
 OPENID_ENDPOINT = "https://steamcommunity.com/openid/login"
 RETURN_TO       = f"{BACKEND_URL}/auth/steam/callback"
@@ -41,7 +43,7 @@ REALM           = BACKEND_URL
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
-app = FastAPI(title="Deck Shell API", version="0.5.0")
+app = FastAPI(title="Deck Shell API", version="0.6.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -145,15 +147,11 @@ async def auth_steam_callback(request: Request):
     persona = summary["persona"]
     avatar  = summary["avatar"]
 
-    # Store in session for /auth/status
     request.session["steam_id"] = steam_id
     request.session["persona"]  = persona
     request.session["avatar"]   = avatar
     request.session["linked"]   = True
 
-    # Redirect to /done with user data as query params.
-    # The QML shell reads these directly from the URL so it never needs
-    # a separate cookie-authenticated request.
     done_url = (
         f"{BACKEND_URL}/auth/steam/done"
         f"?persona={quote(persona)}"
@@ -195,14 +193,9 @@ async def auth_logout(request: Request):
 
 # ---------------------------------------------------------------------------
 # Routes — Library
-#
-# Accepts an optional ?steamid= query parameter so the QML shell can pass
-# the Steam ID it received from the login redirect URL directly, without
-# relying on session cookies (which may not be forwarded by WebEngineView).
 # ---------------------------------------------------------------------------
 @app.get("/library/owned")
 async def library_owned(request: Request):
-    # Prefer explicit steamid param, fall back to session
     steam_id = (
         request.query_params.get("steamid")
         or request.session.get("steam_id", "")
@@ -233,12 +226,31 @@ async def library_install(request: Request):
     app_id = str(body.get("appId", "")).strip()
     if not app_id or not app_id.isdigit():
         raise HTTPException(400, "Missing or invalid appId")
+
+    # Use steamcmd for a fully silent, no-popup install.
+    # If STEAM_USER / STEAM_PASS env vars are set, log in with that account
+    # so paid games install correctly. Otherwise fall back to anonymous
+    # (works for free-to-play games only).
+    login = f"{STEAM_USER} {STEAM_PASS}" if STEAM_USER else "anonymous"
+
     try:
-        # Trigger the Steam client's install dialog via the steam:// URI protocol.
-        # Requires the Steam client to be installed and running on the system.
-        subprocess.Popen(["steam", f"steam://install/{app_id}"])
+        subprocess.Popen(
+            [
+                "steamcmd",
+                "+login", *login.split(),
+                "+app_update", app_id,
+                "+quit",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
     except FileNotFoundError:
-        raise HTTPException(500, "Steam client not found. Ensure Steam is installed and in PATH.")
+        # steamcmd not found — fall back to Steam URI (will show popup)
+        try:
+            subprocess.Popen(["steam", f"steam://install/{app_id}"])
+        except FileNotFoundError:
+            raise HTTPException(500, "Neither steamcmd nor Steam client found in PATH.")
+
     return JSONResponse({"ok": True, "appId": app_id})
 
 

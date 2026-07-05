@@ -90,7 +90,6 @@ ApplicationWindow {
         SteamLibraryCtrl.refresh()
     }
 
-    // Format bytes -> human readable string
     function formatSize(bytes) {
         if (!bytes || bytes === 0) return ""
         if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + " MB"
@@ -102,12 +101,12 @@ ApplicationWindow {
         SteamLibraryCtrl.refresh()
     }
 
-    // ── Install toast ───────────────────────────────────────────────────────────
+    // ── Install toast ────────────────────────────────────────────────────────────────────
     Rectangle {
         id: installToast
         z: 100
         anchors.horizontalCenter: parent.horizontalCenter
-        y: root.height     // starts offscreen below
+        y: root.height
         width: 520; height: 64; radius: 16
         color: "#1a3a1a"; border.color: "#4caf50"; border.width: 2
         opacity: 0
@@ -116,7 +115,7 @@ ApplicationWindow {
 
         Text {
             anchors.centerIn: parent
-            text: "\u2B07  Installing \u2018" + installToast.gameName + "\u2019 via Steam…"
+            text: "\u2B07  Installing \u2018" + installToast.gameName + "\u2019\u2026"
             color: "#4caf50"; font.pixelSize: 20; font.bold: true
         }
 
@@ -135,7 +134,6 @@ ApplicationWindow {
         }
     }
 
-    // Wire toast to C++ signal
     Connections {
         target: SteamLibraryCtrl
         ignoreUnknownSignals: true
@@ -167,7 +165,7 @@ ApplicationWindow {
         initialItem: homePage
     }
 
-    // ══ HOME ═════════════════════════════════════════════════════════════════════
+    // ══ HOME ═════════════════════════════════════════════════════════════════════════
     Component {
         id: homePage
         FocusScope {
@@ -244,7 +242,7 @@ ApplicationWindow {
         }
     }
 
-    // ══ LIBRARY ══════════════════════════════════════════════════════════════════
+    // ══ LIBRARY ════════════════════════════════════════════════════════════════════════
     Component {
         id: libraryPage
         FocusScope {
@@ -253,8 +251,7 @@ ApplicationWindow {
 
             Component.onCompleted: root.fetchIfNeeded(root.steamId)
 
-            // ─ Game Detail Panel state
-            property var  selectedGame: null   // { appId, name, coverUrl, installed, sizeOnDisk }
+            property var  selectedGame: null
             property bool panelOpen: false
 
             function openPanel(game) {
@@ -272,7 +269,6 @@ ApplicationWindow {
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 48; spacing: 20
 
-                // ─ Header
                 RowLayout {
                     spacing: 20; Layout.fillWidth: true
                     Rectangle {
@@ -305,7 +301,6 @@ ApplicationWindow {
                     }
                 }
 
-                // ─ Filter tabs
                 RowLayout {
                     spacing: 8; Layout.fillWidth: true
                     Repeater {
@@ -339,14 +334,12 @@ ApplicationWindow {
                     Item { Layout.fillWidth: true }
                 }
 
-                // ─ Loading
                 Text {
                     visible: SteamLibraryCtrl.loading
                     text: "Fetching Steam library\u2026"
                     color: "#8a9bb5"; font.pixelSize: 24; Layout.alignment: Qt.AlignHCenter
                 }
 
-                // ─ Game grid
                 GridView {
                     id: gameGrid
                     visible: !SteamLibraryCtrl.loading && SteamLibraryCtrl.count > 0
@@ -365,8 +358,8 @@ ApplicationWindow {
                         id: gameTile
                         width: 184; height: 284
 
-                        property var _installed: installed
-                        function inst() { return _installed === true }
+                        // Explicitly coerce installed to bool to avoid undefined issues
+                        property bool isInstalled: (installed === true)
 
                         color: GridView.isCurrentItem ? "#1e2e45" : "#1a1e28"; radius: 12
                         border.color: GridView.isCurrentItem ? "#5ba3ff" : "#2e3540"
@@ -391,24 +384,23 @@ ApplicationWindow {
                             anchors.top: coverImg.bottom; anchors.left: parent.left
                             anchors.right: parent.right; anchors.margins: 8
                             text: name || ""
-                            color: gameTile.inst() ? "white" : "#b0b8c8"
+                            color: gameTile.isInstalled ? "white" : "#b0b8c8"
                             font.pixelSize: 14; font.bold: GridView.isCurrentItem
                             elide: Text.ElideRight; horizontalAlignment: Text.AlignHCenter
                         }
 
                         // Download badge for uninstalled games
                         Rectangle {
-                            visible: !gameTile.inst()
+                            visible: !gameTile.isInstalled
                             anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter
                             width: parent.width - 16; height: 26; radius: 8
                             color: "#0d2a4a"; border.color: "#2a7bd9"
                             Text { anchors.centerIn: parent; text: "\u2B07 Not Installed"; color: "#5ba3ff"; font.pixelSize: 13 }
                         }
 
-                        // Single click / Enter -> open detail panel
                         Keys.onReturnPressed: libScope.openPanel({
                             appId: appId, name: name, coverUrl: coverUrl,
-                            installed: gameTile.inst(), sizeOnDisk: sizeOnDisk
+                            installed: gameTile.isInstalled, sizeOnDisk: sizeOnDisk
                         })
                         MouseArea {
                             anchors.fill: parent
@@ -417,14 +409,13 @@ ApplicationWindow {
                                 gameGrid.forceActiveFocus()
                                 libScope.openPanel({
                                     appId: appId, name: name, coverUrl: coverUrl,
-                                    installed: gameTile.inst(), sizeOnDisk: sizeOnDisk
+                                    installed: gameTile.isInstalled, sizeOnDisk: sizeOnDisk
                                 })
                             }
                         }
                     }
                 }
 
-                // ─ Empty state
                 Column {
                     visible: !SteamLibraryCtrl.loading && SteamLibraryCtrl.count === 0
                     Layout.alignment: Qt.AlignHCenter; spacing: 16
@@ -438,9 +429,9 @@ ApplicationWindow {
                 }
             }
 
-            // ══════════════════════════════════════════════════════════════════
+            // ══════════════════════════════════════════════════════════════════════════════
             // Game Detail Panel — slides up from the bottom
-            // ══════════════════════════════════════════════════════════════════
+            // ══════════════════════════════════════════════════════════════════════════════
             Rectangle {
                 id: detailPanel
                 visible: libScope.panelOpen && libScope.selectedGame !== null
@@ -453,20 +444,17 @@ ApplicationWindow {
                 color: "#0f1520"
                 border.color: "#2a3a55"; border.width: 1
 
-                // Slide-up entrance
                 property real targetY: libScope.panelOpen ? 0 : height
                 Behavior on y { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
-                y: height   // starts hidden below
+                y: height
                 onVisibleChanged: if (visible) y = 0
 
-                // Dismiss on Escape / B
                 Keys.onEscapePressed: libScope.closePanel()
                 Keys.onPressed: if (event.key === Qt.Key_Back || event.key === Qt.Key_B) libScope.closePanel()
 
                 RowLayout {
                     anchors.fill: parent; anchors.margins: 32; spacing: 36
 
-                    // Cover art
                     Image {
                         id: detailCover
                         source: libScope.selectedGame ? (libScope.selectedGame.coverUrl || "") : ""
@@ -479,7 +467,6 @@ ApplicationWindow {
                         }
                     }
 
-                    // Info + actions
                     ColumnLayout {
                         Layout.fillWidth: true; Layout.fillHeight: true; spacing: 16
 
@@ -491,24 +478,24 @@ ApplicationWindow {
 
                         RowLayout {
                             spacing: 16
-                            // Installed / Not Installed badge
                             Rectangle {
                                 height: 32; radius: 8
                                 width: statusLabel.implicitWidth + 24
-                                color: (libScope.selectedGame && libScope.selectedGame.installed) ? "#1a4a1a" : "#0d2040"
-                                border.color: (libScope.selectedGame && libScope.selectedGame.installed) ? "#4caf50" : "#2a7bd9"
+                                // Use explicit bool coercion so the badge never shows undefined state
+                                property bool gameInstalled: libScope.selectedGame ? (libScope.selectedGame.installed === true) : false
+                                color: gameInstalled ? "#1a4a1a" : "#0d2040"
+                                border.color: gameInstalled ? "#4caf50" : "#2a7bd9"
                                 Text {
                                     id: statusLabel
                                     anchors.centerIn: parent
-                                    text: (libScope.selectedGame && libScope.selectedGame.installed)
-                                          ? "\u2714  Installed" : "\u2B07  Not Installed"
-                                    color: (libScope.selectedGame && libScope.selectedGame.installed) ? "#4caf50" : "#5ba3ff"
+                                    text: parent.gameInstalled ? "\u2714  Installed" : "\u2B07  Not Installed"
+                                    color: parent.gameInstalled ? "#4caf50" : "#5ba3ff"
                                     font.pixelSize: 16; font.bold: true
                                 }
                             }
-                            // Size on disk (only shown if installed and size known)
                             Text {
-                                visible: libScope.selectedGame && libScope.selectedGame.installed
+                                visible: libScope.selectedGame
+                                         && (libScope.selectedGame.installed === true)
                                          && libScope.selectedGame.sizeOnDisk > 0
                                 text: root.formatSize(libScope.selectedGame ? libScope.selectedGame.sizeOnDisk : 0)
                                 color: "#8a9bb5"; font.pixelSize: 16
@@ -517,35 +504,39 @@ ApplicationWindow {
 
                         Item { Layout.fillHeight: true }
 
-                        RowLayout {
+                        // ─ Action buttons row ──────────────────────────────────────
+                        Row {
                             spacing: 20
 
-                            // Primary action: Launch or Install
+                            // Primary action: Launch (installed) or Install (not installed)
                             Rectangle {
                                 id: actionBtn
                                 width: 260; height: 64; radius: 14
-                                focus: true; activeFocusOnTab: true
+                                // Coerce installed to bool so colors never evaluate to undefined
+                                property bool gameInstalled: libScope.selectedGame ? (libScope.selectedGame.installed === true) : false
 
-                                property bool isInstalled: libScope.selectedGame && libScope.selectedGame.installed
-
-                                color: activeFocus
-                                    ? (isInstalled ? "#1a5c22" : "#1a4a80")
-                                    : (isInstalled ? "#1b6b28" : "#1d55a0")
-                                border.color: activeFocus
-                                    ? (isInstalled ? "#4caf50" : "#5ba3ff")
-                                    : "transparent"
+                                color: {
+                                    if (activeFocus)
+                                        return gameInstalled ? "#1a5c22" : "#1a4a80"
+                                    return gameInstalled ? "#1b6b28" : "#1d55a0"
+                                }
+                                border.color: activeFocus ? (gameInstalled ? "#4caf50" : "#5ba3ff") : "transparent"
                                 border.width: activeFocus ? 2 : 0
                                 Behavior on color { ColorAnimation { duration: 120 } }
+
+                                // Ensure this button always gets focus when panel opens
+                                focus: true
+                                activeFocusOnTab: true
 
                                 Row {
                                     anchors.centerIn: parent; spacing: 14
                                     Text {
-                                        text: actionBtn.isInstalled ? "\u25B6" : "\u2B07"
+                                        text: actionBtn.gameInstalled ? "\u25B6" : "\u2B07"
                                         color: "white"; font.pixelSize: 26
                                         anchors.verticalCenter: parent.verticalCenter
                                     }
                                     Text {
-                                        text: actionBtn.isInstalled ? "Launch" : "Install"
+                                        text: actionBtn.gameInstalled ? "Launch" : "Install"
                                         color: "white"; font.pixelSize: 26; font.bold: true
                                         anchors.verticalCenter: parent.verticalCenter
                                     }
@@ -554,20 +545,22 @@ ApplicationWindow {
                                 function doAction() {
                                     var g = libScope.selectedGame
                                     if (!g) return
-                                    if (g.installed)
+                                    if (g.installed === true) {
                                         SteamLibraryCtrl.launchGame(g.appId)
-                                    else
-                                        SteamLibraryCtrl.installGame(g.appId)
+                                    } else {
+                                        installToast.show(g.name || ("App " + g.appId))
+                                        SteamLibraryCtrl.installGame(g.appId, g.name)
+                                    }
                                     libScope.closePanel()
                                 }
                                 Keys.onReturnPressed: doAction()
                                 MouseArea { anchors.fill: parent; onClicked: parent.doAction() }
                             }
 
-                            // Uninstall button (only visible when installed)
+                            // Uninstall button (only when installed)
                             Rectangle {
                                 id: uninstallBtn
-                                visible: libScope.selectedGame && libScope.selectedGame.installed
+                                visible: libScope.selectedGame && (libScope.selectedGame.installed === true)
                                 width: 180; height: 64; radius: 14
                                 color: activeFocus ? "#4a1010" : "#2a1010"
                                 border.color: activeFocus ? "#e74c3c" : "#552020"
@@ -592,7 +585,7 @@ ApplicationWindow {
                                 }
                             }
 
-                            // Dismiss
+                            // Close
                             Rectangle {
                                 width: 120; height: 64; radius: 14
                                 color: activeFocus ? "#2a2a3a" : "#1a1a26"
@@ -614,7 +607,7 @@ ApplicationWindow {
                     var tile = gameGrid.currentItem
                     libScope.openPanel({
                         appId: tile.appId, name: tile.name,
-                        coverUrl: tile.coverUrl, installed: tile._installed === true,
+                        coverUrl: tile.coverUrl, installed: tile.isInstalled,
                         sizeOnDisk: tile.sizeOnDisk
                     })
                 }
@@ -624,7 +617,7 @@ ApplicationWindow {
         }
     }
 
-    // ══ STEAM ACCOUNT ══════════════════════════════════════════════════════════
+    // ══ STEAM ACCOUNT ══════════════════════════════════════════════════════════════
     Component {
         id: steamAccountPage
         FocusScope {
@@ -720,7 +713,7 @@ ApplicationWindow {
         }
     }
 
-    // ══ STORE ═══════════════════════════════════════════════════════════════════
+    // ══ STORE ═════════════════════════════════════════════════════════════════════════
     Component {
         id: storePage
         FocusScope {
@@ -748,7 +741,7 @@ ApplicationWindow {
         }
     }
 
-    // ══ SETTINGS ════════════════════════════════════════════════════════════════
+    // ══ SETTINGS ═════════════════════════════════════════════════════════════════════════
     Component {
         id: settingsPage
         FocusScope {
@@ -805,7 +798,7 @@ ApplicationWindow {
         }
     }
 
-    // ══ POWER ═══════════════════════════════════════════════════════════════════
+    // ══ POWER ═════════════════════════════════════════════════════════════════════════
     Component {
         id: powerPage
         FocusScope {

@@ -94,8 +94,24 @@ ListModel {
         _rebuild()
     }
 
-    function launchGame(appId)  { Qt.openUrlExternally("steam://run/" + appId) }
-    function installGame(appId) { Qt.openUrlExternally("steam://install/" + appId) }
+    function launchGame(appId) {
+        Qt.openUrlExternally("steam://run/" + appId)
+    }
+
+    // POST to backend /library/install so steamcmd handles it silently
+    // without triggering the Steam client confirmation popup.
+    function installGame(appId, name) {
+        var xhr = new XMLHttpRequest()
+        xhr.open("POST", "https://api.accesshomeserver.uk/library/install", true)
+        xhr.setRequestHeader("Content-Type", "application/json")
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState === 4) {
+                console.log("[SteamLibrary] installGame response:", xhr.status, xhr.responseText)
+            }
+        }
+        xhr.send(JSON.stringify({ appId: appId }))
+        console.log("[SteamLibrary] installGame triggered for appId:", appId)
+    }
 
     function _rebuild() {
         var source = _owned.length > 0 ? _owned : _local
