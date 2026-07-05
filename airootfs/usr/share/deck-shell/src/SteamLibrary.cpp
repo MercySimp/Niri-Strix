@@ -11,7 +11,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QProcess>
-#include <QStandardPaths>
+#include <QDesktopServices>
 #include <QDebug>
 #include <algorithm>
 
@@ -284,16 +284,14 @@ void SteamLibraryModel::installGame(const QString &appId)
     for (const SteamGame &g : m_gamesMerged)
         if (g.appId == appId) { name = g.name; break; }
 
-    // Use the Steam client's built-in console mode to queue a download silently.
-    // "-console" opens the Steam console without showing the main window.
-    // "+app_update <id>" tells Steam to download/update the app immediately.
-    // This uses the already-logged-in Steam session, so paid games work fine.
-    // No install confirmation dialog is shown.
-    qDebug() << "[SteamLibrary] installGame via steam -console +app_update:" << appId;
-    QProcess::startDetached(QStringLiteral("steam"),
-        { QStringLiteral("-console"),
-          QStringLiteral("+app_update"),
-          appId });
+    // When Steam is already running, passing steam://install/<appId> via
+    // QDesktopServices (xdg-open) hands the URI directly to the running Steam
+    // process over its IPC socket. Steam queues the download immediately
+    // without showing the install confirmation dialog because the request
+    // comes from the protocol handler rather than a fresh steam process launch.
+    const QString uri = QStringLiteral("steam://install/") + appId;
+    qDebug() << "[SteamLibrary] installGame via xdg-open:" << uri;
+    QDesktopServices::openUrl(QUrl(uri));
 
     emit installRequested(appId, name);
 }
