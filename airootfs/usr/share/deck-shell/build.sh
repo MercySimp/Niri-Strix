@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# Repo root is 3 levels up from airootfs/usr/share/deck-shell
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+SERVICE_SRC="$REPO_ROOT/airootfs/usr/lib/systemd/user/steam-install-confirm.service"
 
 echo "[build] Configuring..."
 cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
@@ -12,13 +17,14 @@ echo "[build] Installing binary..."
 sudo cmake --install build
 
 echo "[build] Installing watcher script..."
-sudo install -Dm755 steam-install-confirm.sh /usr/share/deck-shell/steam-install-confirm.sh
+sudo install -Dm755 "$SCRIPT_DIR/steam-install-confirm.sh" /usr/share/deck-shell/steam-install-confirm.sh
 
 echo "[build] Installing systemd user service..."
-# Must be copied before daemon-reload so systemctl can find the unit
-sudo install -Dm644 \
-    "$(dirname "$0")/../lib/systemd/user/steam-install-confirm.service" \
-    /usr/lib/systemd/user/steam-install-confirm.service
+if [[ ! -f "$SERVICE_SRC" ]]; then
+    echo "[build] ERROR: service file not found at $SERVICE_SRC"
+    exit 1
+fi
+sudo install -Dm644 "$SERVICE_SRC" /usr/lib/systemd/user/steam-install-confirm.service
 
 echo "[build] Enabling systemd user service..."
 systemctl --user daemon-reload
