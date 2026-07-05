@@ -11,6 +11,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QProcess>
+#include <QStandardPaths>
 #include <QDebug>
 #include <algorithm>
 
@@ -123,7 +124,6 @@ QList<SteamGame> SteamLibraryModel::parseLibraryRoot(const QString &path)
 // ---------------------------------------------------------------------------
 void SteamLibraryModel::watchLibraryRoots()
 {
-    // Remove old paths and re-add the current set.
     if (!m_watcher.directories().isEmpty())
         m_watcher.removePaths(m_watcher.directories());
     const QStringList roots = findLibraryRoots();
@@ -135,7 +135,6 @@ void SteamLibraryModel::onWatchedDirChanged(const QString &path)
 {
     Q_UNUSED(path)
     qDebug() << "[SteamLibrary] steamapps dir changed, auto-refreshing";
-    // Re-run the full local scan + re-merge with owned list if we have one.
     if (!m_lastSteamId.isEmpty())
         fetchOwnedGamesForId(m_lastSteamId);
     else
@@ -194,7 +193,7 @@ void SteamLibraryModel::refresh()
     });
     m_gamesLocal = local;
     setMergedGames(local);
-    watchLibraryRoots();   // re-arm watcher after each refresh
+    watchLibraryRoots();
     setLoading(false);
 }
 
@@ -280,14 +279,51 @@ void SteamLibraryModel::launchGame(const QString &appId)
 
 void SteamLibraryModel::installGame(const QString &appId)
 {
-    // Look up the name for the toast signal before launching.
+    // Look up game name for the toast signal.
     QString name;
     for (const SteamGame &g : m_gamesMerged)
         if (g.appId == appId) { name = g.name; break; }
 
-    // steam://install/{appId} opens Steam's install dialog directly.
-    QProcess::startDetached(QStringLiteral("steam"),
-        { QStringLiteral("steam://install/") + appId });
+    // Determine login credentials from environment.
+    // If STEAM_USER is set, use it (allows paid games to install).
+    // Otherwise fall back to anonymous (free-to-play / already-owned installs).
+    QByteArray steamUser = qgetenv("STEAM_USER");
+    QByteArray steamPass = qgetenv("STEAM_PASS");
+
+    // Try steamcmd first — fully silent, no GUI popup.
+    QString steamcmdPath = QStandardPaths::findExecutable(QStringLiteral("steamcmd"));
+    if (!steamcmdPath.isEmpty()) {
+        QStringList args;
+        if (!steamUser.isEmpty()) {
+            args << QStringLiteral("+login")
+                 << QString::fromUtf8(steamUser)
+                 << QString::fromUtf8(steamPass);
+        } else {
+            args << QStringLiteral("+login") << QStringLiteral("anonymous");
+        }
+        args << QStringLiteral("+app_update") << appId
+             << QStringLiteral("validate")
+             << QStringLiteral("+quit");
+
+        qDebug() << "[SteamLibrary] installGame via steamcmd:" << appId;
+        QProcess::startDetached(steamcmdPath, args);
+        emit installRequested(appId, name);
+        return;
+    }
+
+    // steamcmd not found — fall back to the Steam client -silent flag.
+    // Using "-silent" suppresses the install dialog on most Steam builds.
+    QString steamPath = QStandardPaths::findExecutable(QStringLiteral("steam"));
+    if (!steamPath.isEmpty()) {
+        qDebug() << "[SteamLibrary] installGame via steam -silent:" << appId;
+        QProcess::startDetached(steamPath,
+            { QStringLiteral("-silent"),
+              QStringLiteral("steam://install/") + appId });
+        emit installRequested(appId, name);
+        return;
+    }
+
+    qWarning() << "[SteamLibrary] installGame: neither steamcmd nor steam found in PATH for appId:" << appId;
     emit installRequested(appId, name);
 }
 
