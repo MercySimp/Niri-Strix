@@ -19,7 +19,6 @@ ApplicationWindow {
     property string steamAvatar:  ""
     property string steamId:      ""
 
-    // Parse a single query param from a URL string
     function getParam(url, key) {
         var idx = url.indexOf("?")
         if (idx < 0) return ""
@@ -32,18 +31,15 @@ ApplicationWindow {
         return ""
     }
 
-    // Called after login completes.
     function handleLoginDone(urlStr) {
         var persona = getParam(urlStr, "persona")
         var avatar  = getParam(urlStr, "avatar")
         var sid     = getParam(urlStr, "steamid")
-
         if (persona !== "") {
             steamLinked  = true
             steamPersona = persona
             steamAvatar  = avatar
             steamId      = sid
-            // Ensure AllOwned filter is active so games are visible immediately
             SteamLibrary.filterMode = 1
             SteamLibraryCtrl.fetchOwnedGamesForId(sid)
         } else {
@@ -51,7 +47,6 @@ ApplicationWindow {
         }
     }
 
-    // XHR fallback for startup session restore
     function pollAuthStatus() {
         var xhr = new XMLHttpRequest()
         xhr.open("GET", backendUrl + "/auth/status", true)
@@ -90,10 +85,8 @@ ApplicationWindow {
         SteamLibraryCtrl.refresh()
     }
 
-    // Poll on startup in case the user was already logged in from a previous session
     Component.onCompleted: pollAuthStatus()
 
-    // ── Controller signals ────────────────────────────────────────────────────────
     Connections {
         target: Gamepad
         ignoreUnknownSignals: true
@@ -110,8 +103,6 @@ ApplicationWindow {
         function onRb()         { SteamLibrary.filterMode = 1 }
     }
 
-    // Root keyboard handler — arrow keys move focus, Escape goes back,
-    // Return activates the focused item.
     Item {
         anchors.fill: parent
         focus: true
@@ -119,8 +110,6 @@ ApplicationWindow {
         Keys.onEscapePressed: stack.pop()
         Keys.onUpPressed:    navigator.moveUp()
         Keys.onDownPressed:  navigator.moveDown()
-        // Left/Right at root level move focus only — filter-tab switching
-        // is handled inside libraryPage so it doesn't affect other pages.
         Keys.onLeftPressed:  navigator.moveLeft()
         Keys.onRightPressed: navigator.moveRight()
     }
@@ -148,10 +137,15 @@ ApplicationWindow {
     // ════════════════════════════════════════════════════════════════════════
     Component {
         id: homePage
+        // StackView manages the root item's geometry — do NOT use anchors.fill
+        // on the root; bind width/height to the StackView container instead.
         FocusScope {
-            anchors.fill: parent
+            width:  parent ? parent.width  : root.width
+            height: parent ? parent.height : root.height
             focus: true
+
             Rectangle { anchors.fill: parent; color: "#14161a" }
+
             ColumnLayout {
                 anchors.fill: parent
                 anchors.margins: 60
@@ -165,7 +159,11 @@ ApplicationWindow {
                         spacing: 12
                         visible: root.steamLinked
                         Image { source: root.steamAvatar; width: 40; height: 40; fillMode: Image.PreserveAspectCrop }
-                        Text { text: root.steamPersona; color: "#8a9bb5"; font.pixelSize: 22; anchors.verticalCenter: parent.verticalCenter }
+                        Text {
+                            text: root.steamPersona; color: "#8a9bb5"; font.pixelSize: 22
+                            // anchors.verticalCenter is valid inside a Row (not a Layout)
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
                     }
                 }
 
@@ -175,11 +173,11 @@ ApplicationWindow {
                     Repeater {
                         id: homeNavRepeater
                         model: [
-                            { label: "Library",   icon: "\uD83C\uDFAE" },
-                            { label: "Store",      icon: "\uD83D\uDED2" },
-                            { label: "Downloads",  icon: "\u2B07" },
-                            { label: "Settings",   icon: "\u2699" },
-                            { label: "Power",       icon: "\u23FB" }
+                            { label: "Library",  icon: "\uD83C\uDFAE" },
+                            { label: "Store",     icon: "\uD83D\uDED2" },
+                            { label: "Downloads", icon: "\u2B07" },
+                            { label: "Settings",  icon: "\u2699" },
+                            { label: "Power",     icon: "\u23FB" }
                         ]
                         delegate: Rectangle {
                             id: navTile
@@ -189,7 +187,6 @@ ApplicationWindow {
                             radius: 14
                             border.color: activeFocus ? "#5ba3ff" : "#2e3540"
                             border.width: activeFocus ? 3 : 1
-                            // First tile gets initial focus; Tab/arrow moves through the row.
                             focus: index === 0
                             activeFocusOnTab: true
                             KeyNavigation.right: homeNavRepeater.itemAt(index + 1)
@@ -230,24 +227,33 @@ ApplicationWindow {
                         clip: true
                         model: SteamLibrary
                         delegate: Rectangle {
-                            visible: lastPlayed !== "" && lastPlayed !== "0"
+                            visible: (lastPlayed || "") !== "" && lastPlayed !== "0"
                             width: visible ? 160 : 0
                             height: 190
                             color: "#1a2030"
                             radius: 10
                             clip: true
-                            Image { anchors.fill: parent; source: coverUrl; fillMode: Image.PreserveAspectCrop }
+                            Image { anchors.fill: parent; source: coverUrl || ""; fillMode: Image.PreserveAspectCrop }
                             Rectangle {
-                                anchors.bottom: parent.bottom; width: parent.width; height: 44; color: "#cc14161a"; radius: 10
-                                Text { anchors.centerIn: parent; text: name; color: "white"; font.pixelSize: 13; elide: Text.ElideRight; width: parent.width - 12; horizontalAlignment: Text.AlignHCenter }
+                                anchors.bottom: parent.bottom; width: parent.width; height: 44
+                                color: "#cc14161a"; radius: 10
+                                Text {
+                                    anchors.centerIn: parent; text: name || ""; color: "white"
+                                    font.pixelSize: 13; elide: Text.ElideRight
+                                    width: parent.width - 12; horizontalAlignment: Text.AlignHCenter
+                                }
                             }
                             MouseArea { anchors.fill: parent; onClicked: SteamLibraryCtrl.launchGame(appId) }
                         }
                     }
+                    // Use Layout.alignment instead of anchors inside a ColumnLayout
                     Text {
                         visible: recentList.count === 0 || SteamLibrary.loading
-                        text: SteamLibrary.loading ? "Loading library\u2026" : "No recent games \u2014 head to Library to play something!"
-                        color: "#555e6e"; font.pixelSize: 22; anchors.horizontalCenter: parent.horizontalCenter
+                        text: SteamLibrary.loading
+                            ? "Loading library\u2026"
+                            : "No recent games \u2014 head to Library to play something!"
+                        color: "#555e6e"; font.pixelSize: 22
+                        Layout.alignment: Qt.AlignHCenter
                     }
                 }
             }
@@ -263,14 +269,10 @@ ApplicationWindow {
     Component {
         id: libraryPage
         FocusScope {
-            id: libScope
-            anchors.fill: parent
+            width:  parent ? parent.width  : root.width
+            height: parent ? parent.height : root.height
             focus: true
 
-            // When this page is created and a steamId is already known, make sure
-            // the owned-games list is up-to-date.  This handles the case where the
-            // user navigated: Home → Settings → Steam Account → (login) → back to
-            // Library, because StackView re-creates the Component each time.
             Component.onCompleted: {
                 if (root.steamId !== "") {
                     SteamLibrary.filterMode = 1
@@ -279,23 +281,23 @@ ApplicationWindow {
             }
 
             Rectangle { anchors.fill: parent; color: "#14161a" }
+
             ColumnLayout {
                 anchors.fill: parent
                 anchors.margins: 48
                 spacing: 20
 
-                // ── Header row ──────────────────────────────────────────────
+                // ── Header ──────────────────────────────────────────────────
                 RowLayout {
                     spacing: 20
+                    Layout.fillWidth: true
 
-                    // Back button — keyboard focusable
                     Rectangle {
                         id: libBackBtn
                         width: 48; height: 48; radius: 10
                         color: activeFocus ? "#2a7bd9" : "transparent"
                         border.color: activeFocus ? "#5ba3ff" : "transparent"
                         activeFocusOnTab: true
-                        focus: false
                         Text { anchors.centerIn: parent; text: "\u25C4"; color: "#5ba3ff"; font.pixelSize: 28 }
                         Keys.onReturnPressed: stack.pop()
                         MouseArea { anchors.fill: parent; onClicked: stack.pop() }
@@ -303,11 +305,18 @@ ApplicationWindow {
 
                     Text { text: "Library"; color: "#e8e8e8"; font.pixelSize: 44; font.bold: true }
                     Item { Layout.fillWidth: true }
-                    Text { text: SteamLibrary.count + " games"; color: "#8a9bb5"; font.pixelSize: 22; Layout.alignment: Qt.AlignVCenter }
+
+                    // Use Layout.alignment — this Text is a direct child of RowLayout
+                    Text {
+                        text: (SteamLibrary.count || 0) + " games"
+                        color: "#8a9bb5"; font.pixelSize: 22
+                        Layout.alignment: Qt.AlignVCenter
+                    }
 
                     Rectangle {
                         id: refreshBtn
-                        width: 120; height: 44; color: activeFocus ? "#2a7bd9" : "#1f2531"; radius: 10
+                        width: 120; height: 44
+                        color: activeFocus ? "#2a7bd9" : "#1f2531"; radius: 10
                         border.color: activeFocus ? "#5ba3ff" : "#2e3540"
                         activeFocusOnTab: true
                         Text { anchors.centerIn: parent; text: "\u21BA  Refresh"; color: "#8a9bb5"; font.pixelSize: 18 }
@@ -322,11 +331,10 @@ ApplicationWindow {
                     }
                 }
 
-                // ── Filter tabs (Installed / All Owned) ─────────────────────
-                // Left/Right arrow keys switch tabs; Tab moves to the grid.
+                // ── Filter tabs ──────────────────────────────────────────────
                 RowLayout {
                     id: filterTabRow
-                    spacing: 0
+                    spacing: 8
                     Layout.fillWidth: true
 
                     Repeater {
@@ -339,9 +347,7 @@ ApplicationWindow {
                             height: 48
                             color: active ? "#2a7bd9" : (activeFocus ? "#263550" : "#1f2531")
                             radius: 10
-                            border.color: active ? "#5ba3ff" : (activeFocus ? "#5ba3ff" : "#2e3540")
-                            // Tab 0 gets focus when user Tabs into the filter row;
-                            // Left/Right switch between tabs.
+                            border.color: (active || activeFocus) ? "#5ba3ff" : "#2e3540"
                             activeFocusOnTab: index === 0
                             focus: index === 0
                             KeyNavigation.right: filterTabRepeater.itemAt(index + 1)
@@ -350,8 +356,18 @@ ApplicationWindow {
                             Behavior on color { ColorAnimation { duration: 120 } }
                             Row {
                                 anchors.centerIn: parent; spacing: 8
-                                Text { text: index === 0 ? "LB" : "RB"; color: active ? "white" : "#555e6e"; font.pixelSize: 14; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-                                Text { text: modelData; color: active ? "white" : "#8a9bb5"; font.pixelSize: 20; font.bold: active; anchors.verticalCenter: parent.verticalCenter }
+                                Text {
+                                    text: index === 0 ? "LB" : "RB"
+                                    color: active ? "white" : "#555e6e"
+                                    font.pixelSize: 14; font.bold: true
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                Text {
+                                    text: modelData
+                                    color: active ? "white" : "#8a9bb5"
+                                    font.pixelSize: 20; font.bold: active
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
                             }
                             Keys.onReturnPressed: SteamLibrary.filterMode = index
                             MouseArea {
@@ -365,107 +381,136 @@ ApplicationWindow {
                         visible: SteamLibrary.filterMode === 1 && !root.steamLinked
                         text: "\u26A0  Sign in with Steam in Settings to see your full library"
                         color: "#da7101"; font.pixelSize: 18
-                        Layout.alignment: Qt.AlignVCenter; Layout.leftMargin: 20
+                        Layout.alignment: Qt.AlignVCenter
                     }
+
+                    Item { Layout.fillWidth: true }
                 }
 
-                // ── Loading indicator ───────────────────────────────────────
+                // ── Loading spinner text ─────────────────────────────────────
                 Text {
                     visible: SteamLibrary.loading
                     text: "Fetching Steam library\u2026"
-                    color: "#8a9bb5"; font.pixelSize: 24; Layout.alignment: Qt.AlignHCenter
+                    color: "#8a9bb5"; font.pixelSize: 24
+                    Layout.alignment: Qt.AlignHCenter
                 }
 
-                // ── Game grid ───────────────────────────────────────────────
+                // ── Game grid ────────────────────────────────────────────────
                 GridView {
                     id: gameGrid
                     visible: !SteamLibrary.loading && SteamLibrary.count > 0
-                    Layout.fillWidth: true; Layout.fillHeight: true
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
                     cellWidth: 200; cellHeight: 300
-                    // focus:true so the grid is reachable by Tab from filter tabs
                     focus: true
                     activeFocusOnTab: true
                     clip: true
                     model: SteamLibrary
                     keyNavigationEnabled: true
 
-                    // Left/Right inside the grid; at the first/last column edges
-                    // we fall through to the normal KeyNavigation behaviour.
                     Keys.onLeftPressed: {
-                        if (currentIndex % Math.floor(width / cellWidth) === 0)
+                        var cols = Math.max(1, Math.floor(width / cellWidth))
+                        if (currentIndex % cols === 0)
                             filterTabRepeater.itemAt(0).forceActiveFocus()
                         else
                             moveCurrentIndexLeft()
                     }
                     Keys.onRightPressed: {
-                        var cols = Math.floor(width / cellWidth)
-                        if ((currentIndex + 1) % cols === 0 || currentIndex === count - 1)
+                        var cols2 = Math.max(1, Math.floor(width / cellWidth))
+                        if ((currentIndex + 1) % cols2 === 0 || currentIndex === count - 1)
                             filterTabRepeater.itemAt(1).forceActiveFocus()
                         else
                             moveCurrentIndexRight()
                     }
-                    Keys.onUpPressed:    moveCurrentIndexUp()
-                    Keys.onDownPressed:  moveCurrentIndexDown()
+                    Keys.onUpPressed:   moveCurrentIndexUp()
+                    Keys.onDownPressed: moveCurrentIndexDown()
 
                     delegate: Rectangle {
                         id: gameTile
                         width: 184; height: 284
+                        // Guard 'installed' against undefined during model resets
+                        property bool isInstalled: (installed === true)
                         color: GridView.isCurrentItem ? "#1e2e45" : "#1a1e28"
                         radius: 12
                         border.color: GridView.isCurrentItem ? "#5ba3ff" : "#2e3540"
                         border.width: GridView.isCurrentItem ? 3 : 1
                         clip: true
                         Behavior on color { ColorAnimation { duration: 120 } }
+
                         Image {
                             id: coverImg
-                            anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.left: parent.left
+                            anchors.right: parent.right
                             height: parent.height * 0.78
-                            source: coverUrl; fillMode: Image.PreserveAspectCrop; smooth: true; asynchronous: true
+                            source: coverUrl || ""
+                            fillMode: Image.PreserveAspectCrop
+                            smooth: true; asynchronous: true
                             Rectangle {
                                 anchors.fill: parent; color: "#252c38"
                                 visible: coverImg.status !== Image.Ready
                                 Text { anchors.centerIn: parent; text: "\uD83C\uDFAE"; font.pixelSize: 52 }
                             }
                         }
+
                         Text {
-                            anchors.top: coverImg.bottom; anchors.left: parent.left; anchors.right: parent.right; anchors.margins: 8
-                            text: name; color: installed ? "white" : "#b0b8c8"
-                            font.pixelSize: 15; font.bold: GridView.isCurrentItem
-                            elide: Text.ElideRight; horizontalAlignment: Text.AlignHCenter
+                            anchors.top: coverImg.bottom
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.margins: 8
+                            text: name || ""
+                            color: gameTile.isInstalled ? "white" : "#b0b8c8"
+                            font.pixelSize: 15
+                            font.bold: GridView.isCurrentItem
+                            elide: Text.ElideRight
+                            horizontalAlignment: Text.AlignHCenter
                         }
+
                         Rectangle {
-                            visible: !installed
-                            anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter
-                            width: parent.width - 16; height: 24; radius: 8; color: "#1f2531"; border.color: "#2e3540"
+                            visible: !gameTile.isInstalled
+                            anchors.bottom: parent.bottom
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            width: parent.width - 16; height: 24; radius: 8
+                            color: "#1f2531"; border.color: "#2e3540"
                             Text { anchors.centerIn: parent; text: "Not installed"; color: "#8a9bb5"; font.pixelSize: 13 }
                         }
-                        Keys.onReturnPressed: installed ? SteamLibraryCtrl.launchGame(appId) : SteamLibraryCtrl.installGame(appId)
+
+                        Keys.onReturnPressed:
+                            gameTile.isInstalled
+                                ? SteamLibraryCtrl.launchGame(appId)
+                                : SteamLibraryCtrl.installGame(appId)
+
                         MouseArea {
                             anchors.fill: parent
                             onClicked: { gameGrid.currentIndex = index; gameGrid.forceActiveFocus() }
-                            onDoubleClicked: installed ? SteamLibraryCtrl.launchGame(appId) : SteamLibraryCtrl.installGame(appId)
+                            onDoubleClicked:
+                                gameTile.isInstalled
+                                    ? SteamLibraryCtrl.launchGame(appId)
+                                    : SteamLibraryCtrl.installGame(appId)
                         }
                     }
                 }
 
-                // ── Empty state ─────────────────────────────────────────────
+                // ── Empty state ──────────────────────────────────────────────
                 Column {
                     visible: !SteamLibrary.loading && SteamLibrary.count === 0
-                    Layout.alignment: Qt.AlignHCenter; spacing: 16
+                    Layout.alignment: Qt.AlignHCenter
+                    spacing: 16
                     Text { text: "\uD83C\uDFAE"; font.pixelSize: 64; anchors.horizontalCenter: parent.horizontalCenter }
                     Text { text: "No games found"; color: "#e8e8e8"; font.pixelSize: 30; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
                     Text {
                         text: root.steamLinked
                             ? (root.steamId !== "" ? "Make sure STEAM_API_KEY is set on this machine." : "Install a game from the Store.")
                             : "Sign in with Steam in Settings to see your full library."
-                        color: "#555e6e"; font.pixelSize: 20; anchors.horizontalCenter: parent.horizontalCenter
+                        color: "#555e6e"; font.pixelSize: 20
+                        anchors.horizontalCenter: parent.horizontalCenter
                     }
                 }
             }
 
             function activate() {
                 if (gameGrid.currentItem) {
-                    if (gameGrid.currentItem.installed)
+                    if (gameGrid.currentItem.isInstalled)
                         SteamLibraryCtrl.launchGame(gameGrid.currentItem.appId)
                     else
                         SteamLibraryCtrl.installGame(gameGrid.currentItem.appId)
@@ -482,8 +527,10 @@ ApplicationWindow {
     Component {
         id: steamAccountPage
         FocusScope {
-            anchors.fill: parent
+            width:  parent ? parent.width  : root.width
+            height: parent ? parent.height : root.height
             focus: true
+
             Rectangle { anchors.fill: parent; color: "#14161a" }
 
             WebEngineView {
@@ -491,7 +538,6 @@ ApplicationWindow {
                 anchors.fill: parent
                 visible: false
                 url: "about:blank"
-
                 onUrlChanged: {
                     var u = url.toString()
                     if (u.includes("/auth/steam/done") || u.includes("/auth/steam/callback")) {
@@ -500,7 +546,6 @@ ApplicationWindow {
                         root.handleLoginDone(u)
                     }
                 }
-
                 onLoadingChanged: function(info) {
                     if (info.status === WebEngineView.LoadFailedStatus) {
                         console.warn("Steam login page failed:", info.errorString)
@@ -517,14 +562,12 @@ ApplicationWindow {
                 visible: !loginWebView.visible
 
                 RowLayout {
-                    // Back button — keyboard focusable
                     Rectangle {
                         id: acctBackBtn
                         width: 48; height: 48; radius: 10
                         color: activeFocus ? "#2a7bd9" : "transparent"
                         border.color: activeFocus ? "#5ba3ff" : "transparent"
                         activeFocusOnTab: true
-                        focus: false
                         Text { anchors.centerIn: parent; text: "\u25C4"; color: "#5ba3ff"; font.pixelSize: 28 }
                         Keys.onReturnPressed: stack.pop()
                         MouseArea { anchors.fill: parent; onClicked: stack.pop() }
@@ -556,7 +599,8 @@ ApplicationWindow {
                         id: signOutBtn
                         width: 220; height: 58; radius: 12
                         color: activeFocus ? "#c0392b" : "#1f2531"
-                        border.color: activeFocus ? "#e74c3c" : "#2e3540"; border.width: activeFocus ? 3 : 1
+                        border.color: activeFocus ? "#e74c3c" : "#2e3540"
+                        border.width: activeFocus ? 3 : 1
                         focus: root.steamLinked
                         activeFocusOnTab: true
                         Behavior on color { ColorAnimation { duration: 120 } }
@@ -582,7 +626,8 @@ ApplicationWindow {
                             GradientStop { position: 0.0; color: activeFocus ? "#1a8fc2" : "#1b8fc1" }
                             GradientStop { position: 1.0; color: activeFocus ? "#1063a0" : "#155e8e" }
                         }
-                        border.color: activeFocus ? "#5ba3ff" : "#1779a8"; border.width: activeFocus ? 3 : 1
+                        border.color: activeFocus ? "#5ba3ff" : "#1779a8"
+                        border.width: activeFocus ? 3 : 1
                         focus: !root.steamLinked
                         activeFocusOnTab: true
                         Behavior on border.color { ColorAnimation { duration: 120 } }
@@ -619,14 +664,18 @@ ApplicationWindow {
     Component {
         id: storePage
         FocusScope {
-            anchors.fill: parent; focus: true
+            width:  parent ? parent.width  : root.width
+            height: parent ? parent.height : root.height
+            focus: true
+
             Rectangle { anchors.fill: parent; color: "#14161a" }
             ColumnLayout {
                 anchors.centerIn: parent; spacing: 28
                 Text { text: "\uD83D\uDED2  Steam Store"; color: "#e8e8e8"; font.pixelSize: 44; font.bold: true; Layout.alignment: Qt.AlignHCenter }
                 Text { text: "Opens Steam's built-in store browser."; color: "#8a9bb5"; font.pixelSize: 22; Layout.alignment: Qt.AlignHCenter }
                 Rectangle {
-                    width: 260; height: 64; radius: 14; color: activeFocus ? "#1a6ec2" : "#2a7bd9"
+                    width: 260; height: 64; radius: 14
+                    color: activeFocus ? "#1a6ec2" : "#2a7bd9"
                     Layout.alignment: Qt.AlignHCenter
                     focus: true; activeFocusOnTab: true
                     border.color: activeFocus ? "#5ba3ff" : "transparent"; border.width: 2
@@ -636,7 +685,8 @@ ApplicationWindow {
                 }
                 Rectangle {
                     id: storeBackBtn
-                    width: 140; height: 48; radius: 10; color: activeFocus ? "#2a7bd9" : "#1f2531"
+                    width: 140; height: 48; radius: 10
+                    color: activeFocus ? "#2a7bd9" : "#1f2531"
                     Layout.alignment: Qt.AlignHCenter
                     activeFocusOnTab: true
                     border.color: activeFocus ? "#5ba3ff" : "#2e3540"
@@ -655,20 +705,21 @@ ApplicationWindow {
     Component {
         id: settingsPage
         FocusScope {
-            anchors.fill: parent; focus: true
+            width:  parent ? parent.width  : root.width
+            height: parent ? parent.height : root.height
+            focus: true
+
             Rectangle { anchors.fill: parent; color: "#14161a" }
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 60; spacing: 28
 
                 RowLayout {
-                    // Back button — keyboard focusable
                     Rectangle {
                         id: settingsBackBtn
                         width: 48; height: 48; radius: 10
                         color: activeFocus ? "#2a7bd9" : "transparent"
                         border.color: activeFocus ? "#5ba3ff" : "transparent"
                         activeFocusOnTab: true
-                        focus: false
                         Text { anchors.centerIn: parent; text: "\u25C4"; color: "#5ba3ff"; font.pixelSize: 28 }
                         Keys.onReturnPressed: stack.pop()
                         MouseArea { anchors.fill: parent; onClicked: stack.pop() }
@@ -676,13 +727,11 @@ ApplicationWindow {
                     Text { text: "Settings"; color: "#e8e8e8"; font.pixelSize: 44; font.bold: true }
                 }
 
-                // Steam Account row
                 Rectangle {
                     id: steamAccountRow
                     Layout.fillWidth: true; height: 80
                     color: activeFocus ? "#1f2e42" : "#191d26"; radius: 10
                     border.color: activeFocus ? "#5ba3ff" : "#2e3540"
-                    // First settings row gets Tab focus
                     focus: true
                     activeFocusOnTab: true
                     Behavior on color { ColorAnimation { duration: 120 } }
@@ -698,7 +747,8 @@ ApplicationWindow {
                                 anchors.centerIn: parent
                                 text: root.steamLinked ? ("\u2714 " + root.steamPersona) : "Not linked"
                                 color: root.steamLinked ? "#4caf50" : "#c0392b"
-                                font.pixelSize: 16; elide: Text.ElideRight; width: parent.width - 16; horizontalAlignment: Text.AlignHCenter
+                                font.pixelSize: 16; elide: Text.ElideRight
+                                width: parent.width - 16; horizontalAlignment: Text.AlignHCenter
                             }
                         }
                         Text { text: "\u276F"; color: "#5ba3ff"; font.pixelSize: 22 }
@@ -733,7 +783,10 @@ ApplicationWindow {
     Component {
         id: powerPage
         FocusScope {
-            anchors.fill: parent; focus: true
+            width:  parent ? parent.width  : root.width
+            height: parent ? parent.height : root.height
+            focus: true
+
             Rectangle { anchors.fill: parent; color: "#0d0f13"; opacity: 0.97 }
             ColumnLayout {
                 anchors.centerIn: parent; spacing: 32
@@ -752,7 +805,8 @@ ApplicationWindow {
                             id: powerBtn
                             width: 220; height: 120
                             color: activeFocus ? "#c0392b" : "#1f2531"; radius: 14
-                            border.color: activeFocus ? "#e74c3c" : "#2e3540"; border.width: activeFocus ? 3 : 1
+                            border.color: activeFocus ? "#e74c3c" : "#2e3540"
+                            border.width: activeFocus ? 3 : 1
                             focus: index === 0
                             activeFocusOnTab: true
                             KeyNavigation.right: powerRepeater.itemAt(index + 1)
