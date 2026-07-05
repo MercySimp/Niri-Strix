@@ -10,6 +10,7 @@ POST /auth/logout         → clear session
 GET  /library/owned       → {games: [{appId, name, coverUrl, playtimeForever}]}
                             Accepts optional ?steamid=XXXXX query param so the
                             QML shell can fetch without relying on session cookies.
+POST /library/install     → {appId: "XXXXX"} → triggers Steam client install
 POST /system/power        → {action: shutdown|reboot|suspend}
 """
 
@@ -40,7 +41,7 @@ REALM           = BACKEND_URL
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
-app = FastAPI(title="Deck Shell API", version="0.4.0")
+app = FastAPI(title="Deck Shell API", version="0.5.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -224,6 +225,21 @@ async def library_owned(request: Request):
             pass
 
     return JSONResponse({"games": [], "source": "none"})
+
+
+@app.post("/library/install")
+async def library_install(request: Request):
+    body   = await request.json()
+    app_id = str(body.get("appId", "")).strip()
+    if not app_id or not app_id.isdigit():
+        raise HTTPException(400, "Missing or invalid appId")
+    try:
+        # Trigger the Steam client's install dialog via the steam:// URI protocol.
+        # Requires the Steam client to be installed and running on the system.
+        subprocess.Popen(["steam", f"steam://install/{app_id}"])
+    except FileNotFoundError:
+        raise HTTPException(500, "Steam client not found. Ensure Steam is installed and in PATH.")
+    return JSONResponse({"ok": True, "appId": app_id})
 
 
 # ---------------------------------------------------------------------------
