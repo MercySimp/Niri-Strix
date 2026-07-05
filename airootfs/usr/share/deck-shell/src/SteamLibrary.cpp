@@ -5,13 +5,13 @@
 #include <QTextStream>
 #include <QRegularExpression>
 #include <QNetworkRequest>
+#include <QNetworkReply>
 #include <QUrl>
 #include <QUrlQuery>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QProcess>
-#include <QDesktopServices>
 #include <QDebug>
 #include <algorithm>
 
@@ -277,6 +277,27 @@ void SteamLibraryModel::launchGame(const QString &appId)
     QProcess::startDetached(QStringLiteral("steam"), { QStringLiteral("-applaunch"), appId });
 }
 
+// ---------------------------------------------------------------------------
+// Steam local HTTP API helpers
+// ---------------------------------------------------------------------------
+
+// Reads the auth token Steam writes to ~/<steambase>/config/SteamAppData.vdf
+// under the key "AuthTokenForCommands". This token is required for all
+// requests to Steam's localhost:27060 command API.
+static QString readSteamLocalToken(const QString &steamBase)
+{
+    const QString path = steamBase + QStringLiteral("/config/SteamAppData.vdf");
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        qWarning() << "[SteamLibrary] cannot open SteamAppData.vdf at" << path;
+        return {};
+    }
+    QTextStream in(&f);
+    QStringList lines;
+    while (!in.atEnd()) lines << in.readLine();
+    return vdfValue(lines, QStringLiteral("AuthTokenForCommands"));
+}
+
 void SteamLibraryModel::installGame(const QString &appId)
 {
     // Look up game name for the toast signal.
@@ -284,15 +305,42 @@ void SteamLibraryModel::installGame(const QString &appId)
     for (const SteamGame &g : m_gamesMerged)
         if (g.appId == appId) { name = g.name; break; }
 
-    // When Steam is already running, passing steam://install/<appId> via
-    // QDesktopServices (xdg-open) hands the URI directly to the running Steam
-    // process over its IPC socket. Steam queues the download immediately
-    // without showing the install confirmation dialog because the request
-    // comes from the protocol handler rather than a fresh steam process launch.
-    const QString uri = QStringLiteral("steam://install/") + appId;
-    qDebug() << "[SteamLibrary] installGame via xdg-open:" << uri;
-    QDesktopServices::openUrl(QUrl(uri));
+    // Steam runs a local HTTP command server on 127.0.0.1:27060.
+    // POST to /InstallApp with the appid and the auth token from
+    // SteamAppData.vdf queues the download immediately with no dialog.
+    const QString steamBase = steamBasePath();
+    const QString token     = steamBase.isEmpty() ? QString() : readSteamLocalToken(steamBase);
 
+    if (!token.isEmpty()) {
+        QUrl url(QStringLiteral("http://127.0.0.1:27060/InstallApp/"));
+        QUrlQuery q;
+        q.addQueryItem(QStringLiteral("appid"),     appId);
+        q.addQueryItem(QStringLiteral("authtoken"), token);
+        q.addQueryItem(QStringLiteral("type"),      QStringLiteral("game"));
+        url.setQuery(q);
+
+        QNetworkRequest req(url);
+        req.setRawHeader("Accept", "application/json");
+        // Fire-and-forget GET — we don't need the response body.
+        QNetworkReply *reply = m_nam.get(req);
+        connect(reply, &QNetworkReply::finished, reply, [reply, appId]() {
+            if (reply->error() != QNetworkReply::NoError)
+                qWarning() << "[SteamLibrary] InstallApp API error:" << reply->errorString();
+            else
+                qDebug() << "[SteamLibrary] InstallApp API OK for appId:" << appId;
+            reply->deleteLater();
+        });
+
+        qDebug() << "[SteamLibrary] installGame via local Steam API:" << appId;
+        emit installRequested(appId, name);
+        return;
+    }
+
+    // Fallback: no token available (Steam not running or VDF unreadable).
+    // Launch Steam and let it handle the install URI normally.
+    qWarning() << "[SteamLibrary] no Steam auth token — falling back to URI for appId:" << appId;
+    QProcess::startDetached(QStringLiteral("steam"),
+        { QStringLiteral("steam://install/") + appId });
     emit installRequested(appId, name);
 }
 
