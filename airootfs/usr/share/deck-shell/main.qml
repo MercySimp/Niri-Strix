@@ -96,12 +96,40 @@ ApplicationWindow {
         return (bytes / 1073741824).toFixed(2) + " GB"
     }
 
+    // Fetch Steam news for a given appId via the Steam RSS feed (no API key needed)
+    function fetchNews(appId, callback) {
+        var xhr = new XMLHttpRequest()
+        xhr.open("GET",
+            "https://store.steampowered.com/feeds/news/app/" + appId + "/?cc=US&l=english&snr=1_2108_9__2107",
+            true)
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== 4) return
+            var items = []
+            if (xhr.status === 200) {
+                var text = xhr.responseText
+                var re = /<item>([\/\S\s]*?)<\/item>/g
+                var m
+                while ((m = re.exec(text)) !== null && items.length < 5) {
+                    var block   = m[1]
+                    var titleM  = block.match(/<title><\!\[CDATA\[([^\]]+)\]\]><\/title>/)
+                    var dateM   = block.match(/<pubDate>([^<]+)<\/pubDate>/)
+                    items.push({
+                        title: titleM ? titleM[1] : "Untitled",
+                        date:  dateM  ? dateM[1].substring(0, 16) : ""
+                    })
+                }
+            }
+            callback(items)
+        }
+        xhr.send()
+    }
+
     Component.onCompleted: {
         pollAuthStatus()
         SteamLibraryCtrl.refresh()
     }
 
-    // ── Install toast ────────────────────────────────────────────────────────────────────
+    // ── Install toast ───────────────────────────────────────────────────────────────────
     Rectangle {
         id: installToast
         z: 100
@@ -251,19 +279,6 @@ ApplicationWindow {
 
             Component.onCompleted: root.fetchIfNeeded(root.steamId)
 
-            property var  selectedGame: null
-            property bool panelOpen: false
-
-            function openPanel(game) {
-                selectedGame = game
-                panelOpen    = true
-                actionBtn.forceActiveFocus()
-            }
-            function closePanel() {
-                panelOpen = false
-                gameGrid.forceActiveFocus()
-            }
-
             Rectangle { anchors.fill: parent; color: "#14161a" }
 
             ColumnLayout {
@@ -396,19 +411,25 @@ ApplicationWindow {
                             Text { anchors.centerIn: parent; text: "\u2B07 Not Installed"; color: "#5ba3ff"; font.pixelSize: 13 }
                         }
 
-                        Keys.onReturnPressed: libScope.openPanel({
-                            appId: appId, name: name, coverUrl: coverUrl,
-                            installed: gameTile.isInstalled, sizeOnDisk: sizeOnDisk
-                        })
+                        function openGameDetail() {
+                            stack.push(gameDetailPage, {
+                                gameAppId:    appId,
+                                gameName:     name,
+                                gameCover:    coverUrl,
+                                gameInstalled: gameTile.isInstalled,
+                                gameSizeOnDisk: sizeOnDisk,
+                                gameLastPlayed: lastPlayed || "",
+                                gamePlaytime:  playtime   || 0
+                            })
+                        }
+
+                        Keys.onReturnPressed: openGameDetail()
                         MouseArea {
                             anchors.fill: parent
                             onClicked: {
                                 gameGrid.currentIndex = index
                                 gameGrid.forceActiveFocus()
-                                libScope.openPanel({
-                                    appId: appId, name: name, coverUrl: coverUrl,
-                                    installed: gameTile.isInstalled, sizeOnDisk: sizeOnDisk
-                                })
+                                gameTile.openGameDetail()
                             }
                         }
                     }
@@ -427,185 +448,387 @@ ApplicationWindow {
                 }
             }
 
-            // ══════════════════════════════════════════════════════════════════════════════
-            // Game Detail Panel — slides up from the bottom
-            // ══════════════════════════════════════════════════════════════════════════════
+            function activate() {
+                if (gameGrid.activeFocus && gameGrid.currentItem)
+                    gameGrid.currentItem.openGameDetail()
+            }
+            function openDetails()  {}
+            function openSettings() {}
+        }
+    }
+
+    // ══ GAME DETAIL PAGE (Steam Big Picture style) ════════════════════════════════
+    Component {
+        id: gameDetailPage
+        FocusScope {
+            id: detailScope
+            width: parent ? parent.width : root.width
+            height: parent ? parent.height : root.height
+            focus: true
+
+            // Properties populated via stack.push(..., { ... })
+            property string gameAppId:      ""
+            property string gameName:       ""
+            property string gameCover:      ""
+            property bool   gameInstalled:  false
+            property real   gameSizeOnDisk: 0
+            property string gameLastPlayed: ""
+            property int    gamePlaytime:   0
+
+            property var    newsItems:     []
+            property bool   newsLoading:   true
+
+            // Hero banner URL: Steam's library hero image (wide) if available, else header
+            readonly property string heroUrl:
+                "https://cdn.akamai.steamstatic.com/steam/apps/" + gameAppId + "/library_hero.jpg"
+            readonly property string headerUrl:
+                "https://cdn.akamai.steamstatic.com/steam/apps/" + gameAppId + "/header.jpg"
+
+            Component.onCompleted: {
+                newsLoading = true
+                root.fetchNews(gameAppId, function(items) {
+                    newsItems   = items
+                    newsLoading = false
+                })
+            }
+
+            Rectangle { anchors.fill: parent; color: "#14161a" }
+
+            // ──────────────────────────────────────────────────────────────────────────
+            // HERO BANNER
+            // ──────────────────────────────────────────────────────────────────────────
+            Item {
+                id: heroBanner
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                height: 400
+
+                // Try library_hero, fall back to header
+                Image {
+                    id: heroImg
+                    anchors.fill: parent
+                    source: detailScope.heroUrl
+                    fillMode: Image.PreserveAspectCrop
+                    smooth: true; asynchronous: true
+                    onStatusChanged: {
+                        if (status === Image.Error)
+                            source = detailScope.headerUrl
+                    }
+                }
+                // Gradient overlay so text/buttons are readable
+                Rectangle {
+                    anchors.fill: parent
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "transparent" }
+                        GradientStop { position: 0.55; color: "transparent" }
+                        GradientStop { position: 1.0; color: "#14161a" }
+                    }
+                }
+                // dark tint if no art loaded
+                Rectangle {
+                    anchors.fill: parent
+                    color: "#1a2030"
+                    visible: heroImg.status !== Image.Ready
+                    Text { anchors.centerIn: parent; text: "\uD83C\uDFAE"; font.pixelSize: 96 }
+                }
+
+                // Back button — top-left
+                Rectangle {
+                    id: backBtn
+                    anchors.top: parent.top; anchors.left: parent.left
+                    anchors.margins: 24
+                    width: 52; height: 52; radius: 12
+                    color: activeFocus ? "#2a7bd9" : "#22000000"
+                    border.color: activeFocus ? "#5ba3ff" : "#44ffffff"
+                    border.width: 2
+                    focus: true; activeFocusOnTab: true
+                    Behavior on color { ColorAnimation { duration: 120 } }
+                    Text { anchors.centerIn: parent; text: "\u25C4"; color: "white"; font.pixelSize: 26 }
+                    Keys.onReturnPressed: stack.pop()
+                    MouseArea { anchors.fill: parent; onClicked: stack.pop() }
+                }
+
+                // Settings / controller icons — top-right (mirrors Big Picture)
+                Row {
+                    anchors.top: parent.top; anchors.right: parent.right
+                    anchors.margins: 24
+                    spacing: 12
+                    Repeater {
+                        model: ["\uD83C\uDFAE", "\u2699"]
+                        delegate: Rectangle {
+                            width: 52; height: 52; radius: 12
+                            color: activeFocus ? "#2a7bd9" : "#33000000"
+                            border.color: activeFocus ? "#5ba3ff" : "#44ffffff"; border.width: 2
+                            activeFocusOnTab: true
+                            Behavior on color { ColorAnimation { duration: 120 } }
+                            Text { anchors.centerIn: parent; text: modelData; font.pixelSize: 24; color: "white" }
+                        }
+                    }
+                }
+            }
+
+            // ──────────────────────────────────────────────────────────────────────────
+            // ACTION STRIP  (Play / Install  +  stats  +  utility icons)
+            // ──────────────────────────────────────────────────────────────────────────
             Rectangle {
-                id: detailPanel
-                visible: libScope.panelOpen && libScope.selectedGame !== null
-                z: 10
-
+                id: actionStrip
+                anchors.top: heroBanner.bottom
                 anchors.left: parent.left; anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                height: 220
-
-                color: "#0f1520"
+                height: 100
+                color: "#181e2a"
                 border.color: "#2a3a55"; border.width: 1
 
-                property real targetY: libScope.panelOpen ? 0 : height
-                Behavior on y { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
-                y: height
-                onVisibleChanged: if (visible) y = 0
-
-                Keys.onEscapePressed: libScope.closePanel()
-                Keys.onPressed: if (event.key === Qt.Key_Back || event.key === Qt.Key_B) libScope.closePanel()
-
                 RowLayout {
-                    anchors.fill: parent; anchors.margins: 24; spacing: 28
+                    anchors.fill: parent
+                    anchors.leftMargin: 48; anchors.rightMargin: 48
+                    spacing: 32
 
-                    // Cover art — fixed size, never taller than the panel content area
-                    Image {
-                        id: detailCover
-                        source: libScope.selectedGame ? (libScope.selectedGame.coverUrl || "") : ""
-                        width: 112; height: 168
-                        fillMode: Image.PreserveAspectFit; smooth: true; asynchronous: true
-                        Layout.alignment: Qt.AlignVCenter
-                        Rectangle {
-                            anchors.fill: parent; color: "#1a2030"; radius: 8
-                            visible: detailCover.status !== Image.Ready
-                            Text { anchors.centerIn: parent; text: "\uD83C\uDFAE"; font.pixelSize: 40 }
+                    // Primary action button
+                    Rectangle {
+                        id: primaryBtn
+                        width: 260; height: 64; radius: 14
+                        activeFocusOnTab: true
+                        KeyNavigation.right: uninstallStripBtn.visible ? uninstallStripBtn : null
+
+                        property bool isInstalled: detailScope.gameInstalled
+                        color: {
+                            if (activeFocus) return isInstalled ? "#22b834" : "#1a6ec2"
+                            return isInstalled ? "#1db530" : "#1a5fa8"
                         }
-                    }
+                        Behavior on color { ColorAnimation { duration: 120 } }
 
-                    ColumnLayout {
-                        Layout.fillWidth: true; Layout.fillHeight: true; spacing: 10
-
-                        Text {
-                            text: libScope.selectedGame ? (libScope.selectedGame.name || "") : ""
-                            color: "#e8e8e8"; font.pixelSize: 28; font.bold: true
-                            elide: Text.ElideRight; Layout.fillWidth: true
-                        }
-
-                        RowLayout {
-                            spacing: 16
-                            Rectangle {
-                                height: 28; radius: 8
-                                width: statusLabel.implicitWidth + 20
-                                property bool gameInstalled: libScope.selectedGame ? (libScope.selectedGame.installed === true) : false
-                                color: gameInstalled ? "#1a4a1a" : "#0d2040"
-                                border.color: gameInstalled ? "#4caf50" : "#2a7bd9"
-                                Text {
-                                    id: statusLabel
-                                    anchors.centerIn: parent
-                                    text: parent.gameInstalled ? "\u2714  Installed" : "\u2B07  Not Installed"
-                                    color: parent.gameInstalled ? "#4caf50" : "#5ba3ff"
-                                    font.pixelSize: 14; font.bold: true
-                                }
+                        Row {
+                            anchors.centerIn: parent; spacing: 14
+                            Text {
+                                text: primaryBtn.isInstalled ? "\u25B6" : "\u2B07"
+                                color: "white"; font.pixelSize: 28
+                                anchors.verticalCenter: parent.verticalCenter
                             }
                             Text {
-                                visible: libScope.selectedGame
-                                         && (libScope.selectedGame.installed === true)
-                                         && libScope.selectedGame.sizeOnDisk > 0
-                                text: root.formatSize(libScope.selectedGame ? libScope.selectedGame.sizeOnDisk : 0)
-                                color: "#8a9bb5"; font.pixelSize: 14
+                                text: primaryBtn.isInstalled ? "Play" : "Install"
+                                color: "white"; font.pixelSize: 28; font.bold: true
+                                anchors.verticalCenter: parent.verticalCenter
                             }
                         }
 
-                        Item { Layout.fillHeight: true }
+                        function doAction() {
+                            if (detailScope.gameInstalled) {
+                                SteamLibraryCtrl.launchGame(detailScope.gameAppId)
+                            } else {
+                                installToast.show(detailScope.gameName)
+                                SteamLibraryCtrl.installGame(detailScope.gameAppId)
+                            }
+                            stack.pop()
+                        }
+                        Keys.onReturnPressed: doAction()
+                        MouseArea { anchors.fill: parent; onClicked: parent.doAction() }
+                    }
 
-                        // ─ Action buttons row ──────────────────────────────────────
+                    // Uninstall (installed-only)
+                    Rectangle {
+                        id: uninstallStripBtn
+                        visible: detailScope.gameInstalled
+                        width: 160; height: 64; radius: 14
+                        activeFocusOnTab: true
+                        color: activeFocus ? "#4a1010" : "#2a1010"
+                        border.color: activeFocus ? "#e74c3c" : "#552020"; border.width: activeFocus ? 2 : 1
+                        Behavior on color { ColorAnimation { duration: 120 } }
                         Row {
-                            spacing: 16
+                            anchors.centerIn: parent; spacing: 8
+                            Text { text: "\uD83D\uDDD1"; font.pixelSize: 22; anchors.verticalCenter: parent.verticalCenter }
+                            Text { text: "Uninstall"; color: "#e74c3c"; font.pixelSize: 22; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                        }
+                        Keys.onReturnPressed: { SteamLibraryCtrl.uninstallGame(detailScope.gameAppId); stack.pop() }
+                        MouseArea { anchors.fill: parent; onClicked: { SteamLibraryCtrl.uninstallGame(detailScope.gameAppId); stack.pop() } }
+                    }
 
-                            Rectangle {
-                                id: actionBtn
-                                width: 220; height: 56; radius: 12
-                                property bool gameInstalled: libScope.selectedGame ? (libScope.selectedGame.installed === true) : false
+                    // Divider
+                    Rectangle { width: 1; height: 64; color: "#2a3a55"; opacity: 0.6 }
 
-                                color: {
-                                    if (activeFocus)
-                                        return gameInstalled ? "#1a5c22" : "#1a4a80"
-                                    return gameInstalled ? "#1b6b28" : "#1d55a0"
-                                }
-                                border.color: activeFocus ? (gameInstalled ? "#4caf50" : "#5ba3ff") : "transparent"
-                                border.width: activeFocus ? 2 : 0
-                                Behavior on color { ColorAnimation { duration: 120 } }
+                    // Last Played
+                    Column {
+                        spacing: 4; visible: detailScope.gameLastPlayed !== "" && detailScope.gameLastPlayed !== "0"
+                        Text { text: "LAST PLAYED"; color: "#8a9bb5"; font.pixelSize: 14; font.bold: true; font.letterSpacing: 1.2 }
+                        Text {
+                            text: detailScope.gameLastPlayed
+                            color: "#e8e8e8"; font.pixelSize: 20
+                        }
+                    }
 
-                                focus: true
-                                activeFocusOnTab: true
+                    // Play Time
+                    Column {
+                        spacing: 4; visible: detailScope.gamePlaytime > 0
+                        Text { text: "PLAY TIME"; color: "#8a9bb5"; font.pixelSize: 14; font.bold: true; font.letterSpacing: 1.2 }
+                        Text {
+                            text: detailScope.gamePlaytime + " hours"
+                            color: "#e8e8e8"; font.pixelSize: 20
+                        }
+                    }
 
-                                Row {
-                                    anchors.centerIn: parent; spacing: 12
-                                    Text {
-                                        text: actionBtn.gameInstalled ? "\u25B6" : "\u2B07"
-                                        color: "white"; font.pixelSize: 22
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
-                                    Text {
-                                        text: actionBtn.gameInstalled ? "Launch" : "Install"
-                                        color: "white"; font.pixelSize: 22; font.bold: true
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
-                                }
+                    // Install size
+                    Column {
+                        spacing: 4; visible: detailScope.gameInstalled && detailScope.gameSizeOnDisk > 0
+                        Text { text: "SIZE"; color: "#8a9bb5"; font.pixelSize: 14; font.bold: true; font.letterSpacing: 1.2 }
+                        Text {
+                            text: root.formatSize(detailScope.gameSizeOnDisk)
+                            color: "#e8e8e8"; font.pixelSize: 20
+                        }
+                    }
 
-                                function doAction() {
-                                    var g = libScope.selectedGame
-                                    if (!g) return
-                                    if (g.installed === true) {
-                                        SteamLibraryCtrl.launchGame(g.appId)
-                                    } else {
-                                        installToast.show(g.name || ("App " + g.appId))
-                                        SteamLibraryCtrl.installGame(g.appId)
-                                    }
-                                    libScope.closePanel()
-                                }
-                                Keys.onReturnPressed: doAction()
-                                MouseArea { anchors.fill: parent; onClicked: parent.doAction() }
+                    Item { Layout.fillWidth: true }
+                }
+            }
+
+            // ──────────────────────────────────────────────────────────────────────────
+            // SCROLLABLE BODY  (Friends  +  Recent News)
+            // ──────────────────────────────────────────────────────────────────────────
+            Flickable {
+                id: bodyFlick
+                anchors.top: actionStrip.bottom
+                anchors.left: parent.left; anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                contentHeight: bodyColumn.implicitHeight + 60
+                clip: true
+                flickableDirection: Flickable.VerticalFlick
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                Column {
+                    id: bodyColumn
+                    anchors.left: parent.left; anchors.right: parent.right
+                    anchors.margins: 60
+                    anchors.topMargin: 36
+                    spacing: 40
+
+                    // ─ Friends section ────────────────────────────────────────────────
+                    Column {
+                        width: parent.width; spacing: 16
+
+                        Text {
+                            text: "Friends"
+                            color: "#e8e8e8"; font.pixelSize: 28; font.bold: true
+                        }
+
+                        // "Played Previously" sub-heading (matches Steam BP)
+                        Text {
+                            text: "PLAYED PREVIOUSLY"
+                            color: "#8a9bb5"; font.pixelSize: 14; font.letterSpacing: 1.4; font.bold: true
+                        }
+
+                        // Horizontal strip of friend avatars from the library model
+                        // Uses the same coverUrl / lastPlayed fields already in the model
+                        // to show friends who played. If no data is exposed yet, shows a
+                        // "No friends have played this" placeholder.
+                        Item {
+                            width: parent.width; height: 80
+
+                            ListView {
+                                id: friendsList
+                                anchors.fill: parent
+                                orientation: ListView.Horizontal
+                                spacing: 16
+                                clip: true
+                                // SteamLibraryCtrl doesn't expose friend data yet —
+                                // placeholder model so the section renders gracefully
+                                model: 0
+                                delegate: Item {}
                             }
 
-                            Rectangle {
-                                id: uninstallBtn
-                                visible: libScope.selectedGame && (libScope.selectedGame.installed === true)
-                                width: 160; height: 56; radius: 12
-                                color: activeFocus ? "#4a1010" : "#2a1010"
-                                border.color: activeFocus ? "#e74c3c" : "#552020"
-                                border.width: activeFocus ? 2 : 1
-                                activeFocusOnTab: true
-                                Behavior on color { ColorAnimation { duration: 120 } }
-                                Row {
-                                    anchors.centerIn: parent; spacing: 8
-                                    Text { text: "\uD83D\uDDD1"; font.pixelSize: 20; anchors.verticalCenter: parent.verticalCenter }
-                                    Text { text: "Uninstall"; color: "#e74c3c"; font.pixelSize: 20; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                            // Placeholder shown while no friend data available
+                            Row {
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 12
+                                visible: friendsList.count === 0
+                                Rectangle {
+                                    width: 56; height: 56; radius: 28
+                                    color: "#1f2531"; border.color: "#2e3540"
+                                    Text { anchors.centerIn: parent; text: "\uD83D\uDC64"; font.pixelSize: 28 }
                                 }
-                                Keys.onReturnPressed: {
-                                    SteamLibraryCtrl.uninstallGame(libScope.selectedGame.appId)
-                                    libScope.closePanel()
-                                }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: {
-                                        SteamLibraryCtrl.uninstallGame(libScope.selectedGame.appId)
-                                        libScope.closePanel()
-                                    }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "No friends activity available"
+                                    color: "#555e6e"; font.pixelSize: 18
                                 }
                             }
+                        }
+                    }
 
-                            Rectangle {
-                                width: 100; height: 56; radius: 12
-                                color: activeFocus ? "#2a2a3a" : "#1a1a26"
-                                border.color: activeFocus ? "#5ba3ff" : "#2e3540"
-                                activeFocusOnTab: true
-                                Behavior on color { ColorAnimation { duration: 120 } }
-                                Text { anchors.centerIn: parent; text: "\u2715  Close"; color: "#8a9bb5"; font.pixelSize: 18 }
-                                Keys.onReturnPressed: libScope.closePanel()
-                                MouseArea { anchors.fill: parent; onClicked: libScope.closePanel() }
+                    // ─ Divider ───────────────────────────────────────────────────────
+                    Rectangle { width: parent.width; height: 1; color: "#2a3a55"; opacity: 0.5 }
+
+                    // ─ Recent News section ───────────────────────────────────────
+                    Column {
+                        width: parent.width; spacing: 16
+
+                        Text {
+                            text: "Recent News"
+                            color: "#e8e8e8"; font.pixelSize: 28; font.bold: true
+                        }
+
+                        // Loading indicator
+                        Text {
+                            visible: detailScope.newsLoading
+                            text: "Loading news\u2026"
+                            color: "#8a9bb5"; font.pixelSize: 18
+                        }
+
+                        // No news placeholder
+                        Text {
+                            visible: !detailScope.newsLoading && detailScope.newsItems.length === 0
+                            text: "No recent news found for this game."
+                            color: "#555e6e"; font.pixelSize: 18
+                        }
+
+                        // News list
+                        Column {
+                            width: parent.width; spacing: 12
+                            visible: !detailScope.newsLoading && detailScope.newsItems.length > 0
+
+                            Repeater {
+                                model: detailScope.newsItems
+                                delegate: Rectangle {
+                                    width: parent ? parent.width : 0
+                                    height: newsRow.implicitHeight + 28
+                                    color: "#1a1e28"; radius: 12
+                                    border.color: "#2e3540"
+
+                                    Row {
+                                        id: newsRow
+                                        anchors.left: parent.left; anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.margins: 20
+                                        spacing: 20
+
+                                        Rectangle {
+                                            width: 6; height: 48; radius: 3
+                                            color: "#2a7bd9"
+                                            anchors.verticalCenter: parent.verticalCenter
+                                        }
+
+                                        Column {
+                                            width: parent.width - 46; spacing: 4
+                                            anchors.verticalCenter: parent.verticalCenter
+
+                                            Text {
+                                                width: parent.width
+                                                text: modelData.title || ""
+                                                color: "#e8e8e8"; font.pixelSize: 20; font.bold: true
+                                                elide: Text.ElideRight
+                                            }
+                                            Text {
+                                                text: modelData.date || ""
+                                                color: "#8a9bb5"; font.pixelSize: 15
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
 
-            function activate() {
-                if (libScope.panelOpen) { actionBtn.doAction(); return }
-                if (gameGrid.activeFocus && gameGrid.currentItem) {
-                    var tile = gameGrid.currentItem
-                    libScope.openPanel({
-                        appId: tile.appId, name: tile.name,
-                        coverUrl: tile.coverUrl, installed: tile.isInstalled,
-                        sizeOnDisk: tile.sizeOnDisk
-                    })
-                }
-            }
+            function activate()     { primaryBtn.doAction() }
             function openDetails()  {}
             function openSettings() {}
         }
