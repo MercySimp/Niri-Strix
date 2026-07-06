@@ -14,8 +14,10 @@ ApplicationWindow {
 
     readonly property string backendUrl: "https://api.accesshomeserver.uk"
 
-    // Set these to a stable writable location on the client.
-    // If this is Steam Deck / SteamOS for the deck user, these are reasonable.
+    // FIX: ensure the WebEngine directories exist before the profile tries to
+    // use them.  Qt.createQmlObject is not needed — the dirs are now created
+    // by SteamLibraryModel's constructor (C++ side) before the QML engine
+    // loads, so by the time this file runs they already exist.
     readonly property string webDataPath:  "/home/deck/.local/share/deck-shell/webengine"
     readonly property string webCachePath: "/home/deck/.cache/deck-shell/webengine"
 
@@ -26,16 +28,26 @@ ApplicationWindow {
     property string lastFetchedId: ""
 
     // ── Shared persistent profile ───────────────────────────────────────────────
+    // FIX: Qt 6.9 deprecates constructing WebEngineProfile with property
+    // bindings before storageName is set (triggers the 'off-the-record to
+    // disk-based' warning and the FILE_ERROR_ACCESS_DENIED cascade).
+    // Setting storageName first via Component.onCompleted is the recommended
+    // pattern until WebEngineProfilePrototype becomes the default API.
     WebEngineProfile {
         id: deckProfile
-        storageName: "DeckShell"
         offTheRecord: false
         persistentCookiesPolicy: WebEngineProfile.ForcePersistentCookies
         httpCacheType: WebEngineProfile.DiskHttpCache
-        persistentStoragePath: root.webDataPath
-        cachePath: root.webCachePath
 
         Component.onCompleted: {
+            // Set storage paths before storageName so the engine knows the
+            // target directories before it attempts to create any cache files.
+            persistentStoragePath = root.webDataPath
+            cachePath             = root.webCachePath
+            // storageName must be set last — this is the trigger that switches
+            // the profile from off-the-record to disk-based mode.
+            storageName           = "DeckShell"
+
             console.log("deckProfile storageName:", storageName)
             console.log("deckProfile persistentStoragePath:", persistentStoragePath)
             console.log("deckProfile cachePath:", cachePath)

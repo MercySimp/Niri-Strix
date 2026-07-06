@@ -106,8 +106,10 @@ SteamGame SteamLibraryModel::parseAppManifest(const QString &acfPath)
     QString sz   = vdfValue(lines, "SizeOnDisk");
     g.sizeOnDisk = sz.isEmpty() ? 0 : sz.toLongLong();
     g.installed  = !g.appId.isEmpty() && !g.name.isEmpty();
-    g.coverUrl   = QStringLiteral("https://cdn.steamstatic.com/steam/apps/%1/library_600x900.jpg").arg(g.appId);
-    g.logoUrl    = QStringLiteral("https://cdn.steamstatic.com/steam/apps/%1/header.jpg").arg(g.appId);
+    // FIX: use cdn.akamai.steamstatic.com — cdn.steamstatic.com returns 404
+    //      for library_600x900 images.
+    g.coverUrl   = QStringLiteral("https://cdn.akamai.steamstatic.com/steam/apps/%1/library_600x900.jpg").arg(g.appId);
+    g.logoUrl    = QStringLiteral("https://cdn.akamai.steamstatic.com/steam/apps/%1/header.jpg").arg(g.appId);
     return g;
 }
 
@@ -151,6 +153,12 @@ void SteamLibraryModel::onWatchedDirChanged(const QString &path)
 SteamLibraryModel::SteamLibraryModel(QObject *parent)
     : QAbstractListModel(parent)
 {
+    // FIX: pre-create the WebEngine data/cache directories so QtWebEngine
+    // never encounters FILE_ERROR_ACCESS_DENIED on its first write.
+    const QString home = QDir::homePath();
+    QDir().mkpath(home + QStringLiteral("/.local/share/deck-shell/webengine"));
+    QDir().mkpath(home + QStringLiteral("/.cache/deck-shell/webengine"));
+
     connect(&m_nam,     &QNetworkAccessManager::finished,
             this,       &SteamLibraryModel::handleLibraryReply);
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged,
@@ -262,9 +270,10 @@ void SteamLibraryModel::handleLibraryReply(QNetworkReply *reply)
             g.name            = nm;
             g.installed       = false;
             g.playtimeForever = 0;
+            // FIX: use cdn.akamai.steamstatic.com — cdn.steamstatic.com returns 404
             g.coverUrl        = obj.value(QStringLiteral("coverUrl")).toString(
-                                QStringLiteral("https://cdn.steamstatic.com/steam/apps/%1/library_600x900.jpg").arg(id));
-            g.logoUrl         = QStringLiteral("https://cdn.steamstatic.com/steam/apps/%1/header.jpg").arg(id);
+                                QStringLiteral("https://cdn.akamai.steamstatic.com/steam/apps/%1/library_600x900.jpg").arg(id));
+            g.logoUrl         = QStringLiteral("https://cdn.akamai.steamstatic.com/steam/apps/%1/header.jpg").arg(id);
         }
         merged << g;
     }
