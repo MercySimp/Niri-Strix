@@ -212,6 +212,112 @@ ApplicationWindow {
         initialItem: homePage
     }
 
+    // ── In-app article viewer popup ──────────────────────────────────────────────────
+    Rectangle {
+        id: articlePopup
+        z: 200
+        anchors.fill: parent
+        color: "#CC000000"
+        visible: false
+
+        property string articleUrl: ""
+
+        function openUrl(url) {
+            articleUrl = url
+            articleWebView.url = url
+            visible = true
+            closePopupBtn.forceActiveFocus()
+        }
+
+        function close() {
+            visible = false
+            articleWebView.url = "about:blank"
+            articleUrl = ""
+        }
+
+        // Dimmed backdrop click to close
+        MouseArea {
+            anchors.fill: parent
+            onClicked: articlePopup.close()
+        }
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: parent.width * 0.88
+            height: parent.height * 0.88
+            color: "#14161a"
+            radius: 16
+            border.color: "#2a3a55"
+            border.width: 2
+            clip: true
+
+            // Intercept clicks so they don't propagate to the backdrop
+            MouseArea { anchors.fill: parent }
+
+            // Title bar
+            Rectangle {
+                id: popupTitleBar
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                height: 52
+                color: "#181e2a"
+                radius: 16
+
+                // Square off bottom corners
+                Rectangle {
+                    anchors.bottom: parent.bottom
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    height: 16
+                    color: parent.color
+                }
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left
+                    anchors.leftMargin: 20
+                    text: articlePopup.articleUrl
+                    color: "#8a9bb5"
+                    font.pixelSize: 14
+                    elide: Text.ElideRight
+                    width: parent.width - 80
+                }
+
+                Rectangle {
+                    id: closePopupBtn
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.rightMargin: 12
+                    width: 36; height: 36; radius: 8
+                    color: activeFocus ? "#c0392b" : "#2a1010"
+                    border.color: activeFocus ? "#e74c3c" : "#552020"
+                    activeFocusOnTab: true
+                    Behavior on color { ColorAnimation { duration: 100 } }
+                    Text {
+                        anchors.centerIn: parent
+                        text: "\u2715"
+                        color: "#e74c3c"
+                        font.pixelSize: 18; font.bold: true
+                    }
+                    Keys.onReturnPressed: articlePopup.close()
+                    MouseArea { anchors.fill: parent; onClicked: articlePopup.close() }
+                }
+            }
+
+            WebEngineView {
+                id: articleWebView
+                anchors.top: popupTitleBar.bottom
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                url: "about:blank"
+            }
+        }
+
+        Keys.onEscapePressed: articlePopup.close()
+    }
+
     // ══ HOME ═════════════════════════════════════════════════════════════════════════
     Component {
         id: homePage
@@ -778,10 +884,10 @@ ApplicationWindow {
 
                                     // Keyboard focus — only when the card has a URL
                                     activeFocusOnTab: hasUrl
-                                    Keys.onReturnPressed: if (hasUrl) Qt.openUrlExternally(modelData.url)
+                                    Keys.onReturnPressed: if (hasUrl) articlePopup.openUrl(modelData.url)
 
                                     function openArticle() {
-                                        if (hasUrl) Qt.openUrlExternally(modelData.url)
+                                        if (hasUrl) articlePopup.openUrl(modelData.url)
                                     }
 
                                     Row {
