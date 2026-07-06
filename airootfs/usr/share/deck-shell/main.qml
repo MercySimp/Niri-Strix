@@ -96,7 +96,6 @@ ApplicationWindow {
         return (bytes / 1073741824).toFixed(2) + " GB"
     }
 
-    // Fetch Steam news for a given appId via the Steam RSS feed (no API key needed)
     function fetchNews(appId, callback) {
         var xhr = new XMLHttpRequest()
         xhr.open("GET",
@@ -411,15 +410,15 @@ ApplicationWindow {
                             Text { anchors.centerIn: parent; text: "\u2B07 Not Installed"; color: "#5ba3ff"; font.pixelSize: 13 }
                         }
 
+                        // Only pass roles that actually exist in SteamLibraryModel
                         function openGameDetail() {
                             stack.push(gameDetailPage, {
-                                gameAppId:    appId,
-                                gameName:     name,
-                                gameCover:    coverUrl,
-                                gameInstalled: gameTile.isInstalled,
-                                gameSizeOnDisk: sizeOnDisk,
-                                gameLastPlayed: lastPlayed || "",
-                                gamePlaytime:  playtime   || 0
+                                gameAppId:      appId        || "",
+                                gameName:       name         || "",
+                                gameCover:      coverUrl     || "",
+                                gameInstalled:  gameTile.isInstalled,
+                                gameSizeOnDisk: sizeOnDisk   || 0,
+                                gameLastPlayed: lastPlayed   || ""
                             })
                         }
 
@@ -467,18 +466,17 @@ ApplicationWindow {
             focus: true
 
             // Properties populated via stack.push(..., { ... })
+            // NOTE: only roles defined in SteamLibraryModel are used here.
             property string gameAppId:      ""
             property string gameName:       ""
             property string gameCover:      ""
             property bool   gameInstalled:  false
             property real   gameSizeOnDisk: 0
             property string gameLastPlayed: ""
-            property int    gamePlaytime:   0
 
-            property var    newsItems:     []
-            property bool   newsLoading:   true
+            property var    newsItems:   []
+            property bool   newsLoading: true
 
-            // Hero banner URL: Steam's library hero image (wide) if available, else header
             readonly property string heroUrl:
                 "https://cdn.akamai.steamstatic.com/steam/apps/" + gameAppId + "/library_hero.jpg"
             readonly property string headerUrl:
@@ -494,9 +492,7 @@ ApplicationWindow {
 
             Rectangle { anchors.fill: parent; color: "#14161a" }
 
-            // ──────────────────────────────────────────────────────────────────────────
-            // HERO BANNER
-            // ──────────────────────────────────────────────────────────────────────────
+            // ─ HERO BANNER ───────────────────────────────────────────────────────────
             Item {
                 id: heroBanner
                 anchors.top: parent.top
@@ -504,7 +500,6 @@ ApplicationWindow {
                 anchors.right: parent.right
                 height: 400
 
-                // Try library_hero, fall back to header
                 Image {
                     id: heroImg
                     anchors.fill: parent
@@ -516,7 +511,6 @@ ApplicationWindow {
                             source = detailScope.headerUrl
                     }
                 }
-                // Gradient overlay so text/buttons are readable
                 Rectangle {
                     anchors.fill: parent
                     gradient: Gradient {
@@ -525,10 +519,8 @@ ApplicationWindow {
                         GradientStop { position: 1.0; color: "#14161a" }
                     }
                 }
-                // dark tint if no art loaded
                 Rectangle {
-                    anchors.fill: parent
-                    color: "#1a2030"
+                    anchors.fill: parent; color: "#1a2030"
                     visible: heroImg.status !== Image.Ready
                     Text { anchors.centerIn: parent; text: "\uD83C\uDFAE"; font.pixelSize: 96 }
                 }
@@ -539,9 +531,8 @@ ApplicationWindow {
                     anchors.top: parent.top; anchors.left: parent.left
                     anchors.margins: 24
                     width: 52; height: 52; radius: 12
-                    color: activeFocus ? "#2a7bd9" : "#22000000"
-                    border.color: activeFocus ? "#5ba3ff" : "#44ffffff"
-                    border.width: 2
+                    color: activeFocus ? "#2a7bd9" : "#55000000"
+                    border.color: activeFocus ? "#5ba3ff" : "#66ffffff"; border.width: 2
                     focus: true; activeFocusOnTab: true
                     Behavior on color { ColorAnimation { duration: 120 } }
                     Text { anchors.centerIn: parent; text: "\u25C4"; color: "white"; font.pixelSize: 26 }
@@ -549,17 +540,16 @@ ApplicationWindow {
                     MouseArea { anchors.fill: parent; onClicked: stack.pop() }
                 }
 
-                // Settings / controller icons — top-right (mirrors Big Picture)
+                // Utility icons — top-right
                 Row {
                     anchors.top: parent.top; anchors.right: parent.right
-                    anchors.margins: 24
-                    spacing: 12
+                    anchors.margins: 24; spacing: 12
                     Repeater {
                         model: ["\uD83C\uDFAE", "\u2699"]
                         delegate: Rectangle {
                             width: 52; height: 52; radius: 12
-                            color: activeFocus ? "#2a7bd9" : "#33000000"
-                            border.color: activeFocus ? "#5ba3ff" : "#44ffffff"; border.width: 2
+                            color: activeFocus ? "#2a7bd9" : "#55000000"
+                            border.color: activeFocus ? "#5ba3ff" : "#66ffffff"; border.width: 2
                             activeFocusOnTab: true
                             Behavior on color { ColorAnimation { duration: 120 } }
                             Text { anchors.centerIn: parent; text: modelData; font.pixelSize: 24; color: "white" }
@@ -568,9 +558,7 @@ ApplicationWindow {
                 }
             }
 
-            // ──────────────────────────────────────────────────────────────────────────
-            // ACTION STRIP  (Play / Install  +  stats  +  utility icons)
-            // ──────────────────────────────────────────────────────────────────────────
+            // ─ ACTION STRIP ──────────────────────────────────────────────────────────
             Rectangle {
                 id: actionStrip
                 anchors.top: heroBanner.bottom
@@ -643,46 +631,29 @@ ApplicationWindow {
                         MouseArea { anchors.fill: parent; onClicked: { SteamLibraryCtrl.uninstallGame(detailScope.gameAppId); stack.pop() } }
                     }
 
-                    // Divider
                     Rectangle { width: 1; height: 64; color: "#2a3a55"; opacity: 0.6 }
 
-                    // Last Played
+                    // Last Played stat
                     Column {
-                        spacing: 4; visible: detailScope.gameLastPlayed !== "" && detailScope.gameLastPlayed !== "0"
+                        spacing: 4
+                        visible: detailScope.gameLastPlayed !== "" && detailScope.gameLastPlayed !== "0"
                         Text { text: "LAST PLAYED"; color: "#8a9bb5"; font.pixelSize: 14; font.bold: true; font.letterSpacing: 1.2 }
-                        Text {
-                            text: detailScope.gameLastPlayed
-                            color: "#e8e8e8"; font.pixelSize: 20
-                        }
+                        Text { text: detailScope.gameLastPlayed; color: "#e8e8e8"; font.pixelSize: 20 }
                     }
 
-                    // Play Time
+                    // Install size stat
                     Column {
-                        spacing: 4; visible: detailScope.gamePlaytime > 0
-                        Text { text: "PLAY TIME"; color: "#8a9bb5"; font.pixelSize: 14; font.bold: true; font.letterSpacing: 1.2 }
-                        Text {
-                            text: detailScope.gamePlaytime + " hours"
-                            color: "#e8e8e8"; font.pixelSize: 20
-                        }
-                    }
-
-                    // Install size
-                    Column {
-                        spacing: 4; visible: detailScope.gameInstalled && detailScope.gameSizeOnDisk > 0
+                        spacing: 4
+                        visible: detailScope.gameInstalled && detailScope.gameSizeOnDisk > 0
                         Text { text: "SIZE"; color: "#8a9bb5"; font.pixelSize: 14; font.bold: true; font.letterSpacing: 1.2 }
-                        Text {
-                            text: root.formatSize(detailScope.gameSizeOnDisk)
-                            color: "#e8e8e8"; font.pixelSize: 20
-                        }
+                        Text { text: root.formatSize(detailScope.gameSizeOnDisk); color: "#e8e8e8"; font.pixelSize: 20 }
                     }
 
                     Item { Layout.fillWidth: true }
                 }
             }
 
-            // ──────────────────────────────────────────────────────────────────────────
-            // SCROLLABLE BODY  (Friends  +  Recent News)
-            // ──────────────────────────────────────────────────────────────────────────
+            // ─ SCROLLABLE BODY ─────────────────────────────────────────────────────────
             Flickable {
                 id: bodyFlick
                 anchors.top: actionStrip.bottom
@@ -696,49 +667,27 @@ ApplicationWindow {
                 Column {
                     id: bodyColumn
                     anchors.left: parent.left; anchors.right: parent.right
-                    anchors.margins: 60
+                    anchors.leftMargin: 60; anchors.rightMargin: 60
                     anchors.topMargin: 36
+                    y: 36
                     spacing: 40
 
-                    // ─ Friends section ────────────────────────────────────────────────
+                    // ─ Friends ───────────────────────────────────────────────────────────
                     Column {
-                        width: parent.width; spacing: 16
+                        width: parent.width; spacing: 12
 
-                        Text {
-                            text: "Friends"
-                            color: "#e8e8e8"; font.pixelSize: 28; font.bold: true
-                        }
+                        Text { text: "Friends"; color: "#e8e8e8"; font.pixelSize: 28; font.bold: true }
 
-                        // "Played Previously" sub-heading (matches Steam BP)
                         Text {
                             text: "PLAYED PREVIOUSLY"
                             color: "#8a9bb5"; font.pixelSize: 14; font.letterSpacing: 1.4; font.bold: true
                         }
 
-                        // Horizontal strip of friend avatars from the library model
-                        // Uses the same coverUrl / lastPlayed fields already in the model
-                        // to show friends who played. If no data is exposed yet, shows a
-                        // "No friends have played this" placeholder.
                         Item {
                             width: parent.width; height: 80
-
-                            ListView {
-                                id: friendsList
-                                anchors.fill: parent
-                                orientation: ListView.Horizontal
-                                spacing: 16
-                                clip: true
-                                // SteamLibraryCtrl doesn't expose friend data yet —
-                                // placeholder model so the section renders gracefully
-                                model: 0
-                                delegate: Item {}
-                            }
-
-                            // Placeholder shown while no friend data available
+                            // Placeholder — friend data not yet exposed by SteamLibraryModel
                             Row {
-                                anchors.verticalCenter: parent.verticalCenter
-                                spacing: 12
-                                visible: friendsList.count === 0
+                                anchors.verticalCenter: parent.verticalCenter; spacing: 12
                                 Rectangle {
                                     width: 56; height: 56; radius: 28
                                     color: "#1f2531"; border.color: "#2e3540"
@@ -753,35 +702,28 @@ ApplicationWindow {
                         }
                     }
 
-                    // ─ Divider ───────────────────────────────────────────────────────
                     Rectangle { width: parent.width; height: 1; color: "#2a3a55"; opacity: 0.5 }
 
-                    // ─ Recent News section ───────────────────────────────────────
+                    // ─ Recent News ─────────────────────────────────────────────────────
                     Column {
-                        width: parent.width; spacing: 16
+                        width: parent.width; spacing: 12
 
-                        Text {
-                            text: "Recent News"
-                            color: "#e8e8e8"; font.pixelSize: 28; font.bold: true
-                        }
+                        Text { text: "Recent News"; color: "#e8e8e8"; font.pixelSize: 28; font.bold: true }
 
-                        // Loading indicator
                         Text {
                             visible: detailScope.newsLoading
                             text: "Loading news\u2026"
                             color: "#8a9bb5"; font.pixelSize: 18
                         }
 
-                        // No news placeholder
                         Text {
                             visible: !detailScope.newsLoading && detailScope.newsItems.length === 0
                             text: "No recent news found for this game."
                             color: "#555e6e"; font.pixelSize: 18
                         }
 
-                        // News list
                         Column {
-                            width: parent.width; spacing: 12
+                            width: parent.width; spacing: 10
                             visible: !detailScope.newsLoading && detailScope.newsItems.length > 0
 
                             Repeater {
@@ -796,19 +738,17 @@ ApplicationWindow {
                                         id: newsRow
                                         anchors.left: parent.left; anchors.right: parent.right
                                         anchors.verticalCenter: parent.verticalCenter
-                                        anchors.margins: 20
-                                        spacing: 20
+                                        anchors.margins: 20; spacing: 16
 
                                         Rectangle {
-                                            width: 6; height: 48; radius: 3
+                                            width: 6; height: 44; radius: 3
                                             color: "#2a7bd9"
                                             anchors.verticalCenter: parent.verticalCenter
                                         }
 
                                         Column {
-                                            width: parent.width - 46; spacing: 4
+                                            width: parent.width - 42; spacing: 4
                                             anchors.verticalCenter: parent.verticalCenter
-
                                             Text {
                                                 width: parent.width
                                                 text: modelData.title || ""
