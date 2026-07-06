@@ -5,7 +5,7 @@ Endpoints
 GET  /auth/steam          → redirect to Steam OpenID
 GET  /auth/steam/callback → handle OpenID return, store session
 GET  /auth/steam/done     → success page with user data in query params for QML shell
-GET  /auth/status         → {linked, persona, avatar, steamId}
+GET  /auth/status         → {linked, persona, avatar, steamId}  (re-issues cookie on active session)
 POST /auth/logout         → clear session
 GET  /library/owned       → {games: [{appId, name, coverUrl, playtimeForever}]}
                             Accepts optional ?steamid=XXXXX query param so the
@@ -36,6 +36,12 @@ BACKEND_URL   = os.environ.get("BACKEND_URL", "https://api.accesshomeserver.uk")
 STEAM_USER    = os.environ.get("STEAM_USER", "")
 STEAM_PASS    = os.environ.get("STEAM_PASS", "")
 
+# Maximum idle time before a session cookie expires (1 year).
+# Every call to /auth/status while linked resets this window, so the user
+# stays logged in indefinitely as long as the app is opened at least once
+# per year. Explicit logout or server-side session.clear() still works.
+SESSION_MAX_AGE = 60 * 60 * 24 * 365   # 1 year
+
 OPENID_ENDPOINT = "https://steamcommunity.com/openid/login"
 RETURN_TO       = f"{BACKEND_URL}/auth/steam/callback"
 REALM           = BACKEND_URL
@@ -43,7 +49,7 @@ REALM           = BACKEND_URL
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
-app = FastAPI(title="Deck Shell API", version="0.6.0")
+app = FastAPI(title="Deck Shell API", version="0.7.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -56,7 +62,7 @@ app.add_middleware(
     SessionMiddleware,
     secret_key=SECRET_KEY,
     session_cookie="deck_session",
-    max_age=60 * 60 * 24 * 30,   # 30 days
+    max_age=SESSION_MAX_AGE,
     https_only=True,
     same_site="lax",
 )
@@ -177,12 +183,32 @@ async def auth_steam_done(request: Request):
 
 @app.get("/auth/status")
 async def auth_status(request: Request):
-    return JSONResponse({
-        "linked":  request.session.get("linked",   False),
-        "steamId": request.session.get("steam_id", ""),
-        "persona": request.session.get("persona",  ""),
-        "avatar":  request.session.get("avatar",   ""),
+    linked   = request.session.get("linked",   False)
+    steam_id = request.session.get("steam_id", "")
+    persona  = request.session.get("persona",  "")
+    avatar   = request.session.get("avatar",   "")
+
+    response = JSONResponse({
+        "linked":  linked,
+        "steamId": steam_id,
+        "persona": persona,
+        "avatar":  avatar,
     })
+
+    # Rolling refresh: re-issue the cookie on every active-session check so
+    # the expiry window slides forward. The user stays logged in indefinitely
+    # as long as the app is opened at least once within SESSION_MAX_AGE.
+    if linked and steam_id:
+        response.set_cookie(
+            key="deck_session",
+            value=request.cookies.get("deck_session", ""),
+            max_age=SESSION_MAX_AGE,
+            httponly=True,
+            secure=True,
+            samesite="lax",
+        )
+
+    return response
 
 
 @app.post("/auth/logout")
