@@ -2,7 +2,6 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import QtWebEngine 1.10
-import QtCore 6.0
 
 ApplicationWindow {
     id: root
@@ -15,10 +14,11 @@ ApplicationWindow {
 
     readonly property string backendUrl: "https://api.accesshomeserver.uk"
 
-    // Resolve paths dynamically using the real user's home directory so the
-    // app works on any account, not just a hardcoded "deck" user.
-    readonly property string webDataPath:  StandardPaths.writableLocation(StandardPaths.AppLocalDataLocation) + "/webengine"
-    readonly property string webCachePath: StandardPaths.writableLocation(StandardPaths.CacheLocation)        + "/webengine"
+    // Paths are injected from C++ via QStandardPaths (main.cpp) as context
+    // properties: webDataPath and webCachePath.  This avoids hardcoding any
+    // username AND avoids the unreliable QtCore 6.0 StandardPaths QML singleton.
+    // The C++ side also calls QDir().mkpath() on both before the engine loads,
+    // so the directories always exist before Chromium's renderer subprocess starts.
 
     property bool   steamLinked:   false
     property string steamPersona:  ""
@@ -27,11 +27,10 @@ ApplicationWindow {
     property string lastFetchedId: ""
 
     // ── Shared persistent profile ───────────────────────────────────────────────
-    // FIX: Qt 6.9 deprecates constructing WebEngineProfile with property
-    // bindings before storageName is set (triggers the 'off-the-record to
-    // disk-based' warning and the FILE_ERROR_ACCESS_DENIED cascade).
-    // Setting storageName first via Component.onCompleted is the recommended
-    // pattern until WebEngineProfilePrototype becomes the default API.
+    // storageName is set last in Component.onCompleted — this is the trigger
+    // that switches the profile from off-the-record to disk-based mode.
+    // Setting persistentStoragePath and cachePath first prevents the
+    // FILE_ERROR_ACCESS_DENIED / "Storage name is empty" cascade.
     WebEngineProfile {
         id: deckProfile
         offTheRecord: false
@@ -39,12 +38,8 @@ ApplicationWindow {
         httpCacheType: WebEngineProfile.DiskHttpCache
 
         Component.onCompleted: {
-            // Set storage paths before storageName so the engine knows the
-            // target directories before it attempts to create any cache files.
-            persistentStoragePath = root.webDataPath
-            cachePath             = root.webCachePath
-            // storageName must be set last — this is the trigger that switches
-            // the profile from off-the-record to disk-based mode.
+            persistentStoragePath = webDataPath
+            cachePath             = webCachePath
             storageName           = "DeckShell"
 
             console.log("deckProfile storageName:", storageName)
@@ -67,7 +62,7 @@ ApplicationWindow {
             if (_pending) return
             _pending = true
             console.log("statusView requesting:", root.backendUrl + "/auth/status")
-            console.log("statusView checking persisted session using profile path:", root.webDataPath)
+            console.log("statusView checking persisted session using profile path:", webDataPath)
             url = root.backendUrl + "/auth/status"
         }
 
