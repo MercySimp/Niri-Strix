@@ -132,7 +132,8 @@ ApplicationWindow {
                         var d = new Date(n.date * 1000)
                         items.push({
                             title: n.title || "Untitled",
-                            date:  isNaN(d.getTime()) ? "" : d.toLocaleDateString(Qt.locale(), "MMM d, yyyy")
+                            date:  isNaN(d.getTime()) ? "" : d.toLocaleDateString(Qt.locale(), "MMM d, yyyy"),
+                            url:   n.url  || ""
                         })
                     }
                 } catch(e) { console.warn("fetchNews parse error:", e) }
@@ -754,12 +755,34 @@ ApplicationWindow {
                             visible: !detailScope.newsLoading && detailScope.newsItems.length > 0
 
                             Repeater {
+                                id: newsRepeater
                                 model: detailScope.newsItems
                                 delegate: Rectangle {
+                                    id: newsCard
                                     width: parent ? parent.width : 0
                                     height: newsRow.implicitHeight + 28
-                                    color: "#1a1e28"; radius: 12
-                                    border.color: "#2e3540"
+                                    radius: 12
+
+                                    // hasUrl drives interactivity; cards without a URL are non-clickable
+                                    property bool hasUrl:   (modelData.url || "") !== ""
+                                    property bool hovered:  false
+                                    property bool focused:  activeFocus
+
+                                    color: (hovered || focused) && hasUrl ? "#222840" : "#1a1e28"
+                                    border.color: focused && hasUrl ? "#5ba3ff"
+                                                : (hovered && hasUrl ? "#3a5a8a" : "#2e3540")
+                                    border.width: focused && hasUrl ? 2 : 1
+
+                                    Behavior on color       { ColorAnimation { duration: 100 } }
+                                    Behavior on border.color { ColorAnimation { duration: 100 } }
+
+                                    // Keyboard focus — only when the card has a URL
+                                    activeFocusOnTab: hasUrl
+                                    Keys.onReturnPressed: if (hasUrl) Qt.openUrlExternally(modelData.url)
+
+                                    function openArticle() {
+                                        if (hasUrl) Qt.openUrlExternally(modelData.url)
+                                    }
 
                                     Row {
                                         id: newsRow
@@ -767,26 +790,52 @@ ApplicationWindow {
                                         anchors.verticalCenter: parent.verticalCenter
                                         anchors.margins: 20; spacing: 16
 
+                                        // Accent bar
                                         Rectangle {
                                             width: 6; height: 44; radius: 3
-                                            color: "#2a7bd9"
+                                            color: newsCard.focused && newsCard.hasUrl ? "#5ba3ff" : "#2a7bd9"
                                             anchors.verticalCenter: parent.verticalCenter
+                                            Behavior on color { ColorAnimation { duration: 100 } }
                                         }
 
+                                        // Title + date
                                         Column {
-                                            width: parent.width - 42; spacing: 4
+                                            width: parent.width - 42 - (newsCard.hasUrl ? 36 : 0)
+                                            spacing: 4
                                             anchors.verticalCenter: parent.verticalCenter
                                             Text {
                                                 width: parent.width
                                                 text: modelData.title || ""
-                                                color: "#e8e8e8"; font.pixelSize: 20; font.bold: true
+                                                color: newsCard.hovered && newsCard.hasUrl ? "#7ab8ff" : "#e8e8e8"
+                                                font.pixelSize: 20; font.bold: true
                                                 elide: Text.ElideRight
+                                                Behavior on color { ColorAnimation { duration: 100 } }
                                             }
                                             Text {
                                                 text: modelData.date || ""
                                                 color: "#8a9bb5"; font.pixelSize: 15
                                             }
                                         }
+
+                                        // Arrow chevron — only shown when clickable
+                                        Text {
+                                            visible: newsCard.hasUrl
+                                            text: "\u276F"
+                                            color: newsCard.focused ? "#5ba3ff"
+                                                 : (newsCard.hovered ? "#7ab8ff" : "#3a4a66")
+                                            font.pixelSize: 22
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            Behavior on color { ColorAnimation { duration: 100 } }
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        hoverEnabled: newsCard.hasUrl
+                                        cursorShape: newsCard.hasUrl ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                        onEntered: newsCard.hovered = true
+                                        onExited:  newsCard.hovered = false
+                                        onClicked: newsCard.openArticle()
                                     }
                                 }
                             }
