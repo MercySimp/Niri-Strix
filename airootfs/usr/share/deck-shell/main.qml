@@ -437,7 +437,7 @@ ApplicationWindow {
 
                 anchors.left: parent.left; anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                height: 380
+                height: 220
 
                 color: "#0f1520"
                 border.color: "#2a3a55"; border.width: 1
@@ -451,34 +451,36 @@ ApplicationWindow {
                 Keys.onPressed: if (event.key === Qt.Key_Back || event.key === Qt.Key_B) libScope.closePanel()
 
                 RowLayout {
-                    anchors.fill: parent; anchors.margins: 32; spacing: 36
+                    anchors.fill: parent; anchors.margins: 24; spacing: 28
 
+                    // Cover art — fixed size, never taller than the panel content area
                     Image {
                         id: detailCover
                         source: libScope.selectedGame ? (libScope.selectedGame.coverUrl || "") : ""
-                        width: 200; height: 300
+                        width: 112; height: 168
                         fillMode: Image.PreserveAspectFit; smooth: true; asynchronous: true
+                        Layout.alignment: Qt.AlignVCenter
                         Rectangle {
                             anchors.fill: parent; color: "#1a2030"; radius: 8
                             visible: detailCover.status !== Image.Ready
-                            Text { anchors.centerIn: parent; text: "\uD83C\uDFAE"; font.pixelSize: 64 }
+                            Text { anchors.centerIn: parent; text: "\uD83C\uDFAE"; font.pixelSize: 40 }
                         }
                     }
 
                     ColumnLayout {
-                        Layout.fillWidth: true; Layout.fillHeight: true; spacing: 16
+                        Layout.fillWidth: true; Layout.fillHeight: true; spacing: 10
 
                         Text {
                             text: libScope.selectedGame ? (libScope.selectedGame.name || "") : ""
-                            color: "#e8e8e8"; font.pixelSize: 34; font.bold: true
+                            color: "#e8e8e8"; font.pixelSize: 28; font.bold: true
                             elide: Text.ElideRight; Layout.fillWidth: true
                         }
 
                         RowLayout {
                             spacing: 16
                             Rectangle {
-                                height: 32; radius: 8
-                                width: statusLabel.implicitWidth + 24
+                                height: 28; radius: 8
+                                width: statusLabel.implicitWidth + 20
                                 property bool gameInstalled: libScope.selectedGame ? (libScope.selectedGame.installed === true) : false
                                 color: gameInstalled ? "#1a4a1a" : "#0d2040"
                                 border.color: gameInstalled ? "#4caf50" : "#2a7bd9"
@@ -487,7 +489,7 @@ ApplicationWindow {
                                     anchors.centerIn: parent
                                     text: parent.gameInstalled ? "\u2714  Installed" : "\u2B07  Not Installed"
                                     color: parent.gameInstalled ? "#4caf50" : "#5ba3ff"
-                                    font.pixelSize: 16; font.bold: true
+                                    font.pixelSize: 14; font.bold: true
                                 }
                             }
                             Text {
@@ -495,7 +497,7 @@ ApplicationWindow {
                                          && (libScope.selectedGame.installed === true)
                                          && libScope.selectedGame.sizeOnDisk > 0
                                 text: root.formatSize(libScope.selectedGame ? libScope.selectedGame.sizeOnDisk : 0)
-                                color: "#8a9bb5"; font.pixelSize: 16
+                                color: "#8a9bb5"; font.pixelSize: 14
                             }
                         }
 
@@ -503,11 +505,11 @@ ApplicationWindow {
 
                         // ─ Action buttons row ──────────────────────────────────────
                         Row {
-                            spacing: 20
+                            spacing: 16
 
                             Rectangle {
                                 id: actionBtn
-                                width: 260; height: 64; radius: 14
+                                width: 220; height: 56; radius: 12
                                 property bool gameInstalled: libScope.selectedGame ? (libScope.selectedGame.installed === true) : false
 
                                 color: {
@@ -523,15 +525,15 @@ ApplicationWindow {
                                 activeFocusOnTab: true
 
                                 Row {
-                                    anchors.centerIn: parent; spacing: 14
+                                    anchors.centerIn: parent; spacing: 12
                                     Text {
                                         text: actionBtn.gameInstalled ? "\u25B6" : "\u2B07"
-                                        color: "white"; font.pixelSize: 26
+                                        color: "white"; font.pixelSize: 22
                                         anchors.verticalCenter: parent.verticalCenter
                                     }
                                     Text {
                                         text: actionBtn.gameInstalled ? "Launch" : "Install"
-                                        color: "white"; font.pixelSize: 26; font.bold: true
+                                        color: "white"; font.pixelSize: 22; font.bold: true
                                         anchors.verticalCenter: parent.verticalCenter
                                     }
                                 }
@@ -543,7 +545,7 @@ ApplicationWindow {
                                         SteamLibraryCtrl.launchGame(g.appId)
                                     } else {
                                         installToast.show(g.name || ("App " + g.appId))
-                                        SteamLibraryCtrl.installGame(g.appId)  // single arg — matches C++ slot
+                                        SteamLibraryCtrl.installGame(g.appId)
                                     }
                                     libScope.closePanel()
                                 }
@@ -554,16 +556,16 @@ ApplicationWindow {
                             Rectangle {
                                 id: uninstallBtn
                                 visible: libScope.selectedGame && (libScope.selectedGame.installed === true)
-                                width: 180; height: 64; radius: 14
+                                width: 160; height: 56; radius: 12
                                 color: activeFocus ? "#4a1010" : "#2a1010"
                                 border.color: activeFocus ? "#e74c3c" : "#552020"
                                 border.width: activeFocus ? 2 : 1
                                 activeFocusOnTab: true
                                 Behavior on color { ColorAnimation { duration: 120 } }
                                 Row {
-                                    anchors.centerIn: parent; spacing: 10
-                                    Text { text: "\uD83D\uDDD1"; font.pixelSize: 22; anchors.verticalCenter: parent.verticalCenter }
-                                    Text { text: "Uninstall"; color: "#e74c3c"; font.pixelSize: 22; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                                    anchors.centerIn: parent; spacing: 8
+                                    Text { text: "\uD83D\uDDD1"; font.pixelSize: 20; anchors.verticalCenter: parent.verticalCenter }
+                                    Text { text: "Uninstall"; color: "#e74c3c"; font.pixelSize: 20; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                                 }
                                 Keys.onReturnPressed: {
                                     SteamLibraryCtrl.uninstallGame(libScope.selectedGame.appId)
@@ -579,12 +581,12 @@ ApplicationWindow {
                             }
 
                             Rectangle {
-                                width: 120; height: 64; radius: 14
+                                width: 100; height: 56; radius: 12
                                 color: activeFocus ? "#2a2a3a" : "#1a1a26"
                                 border.color: activeFocus ? "#5ba3ff" : "#2e3540"
                                 activeFocusOnTab: true
                                 Behavior on color { ColorAnimation { duration: 120 } }
-                                Text { anchors.centerIn: parent; text: "\u2715  Close"; color: "#8a9bb5"; font.pixelSize: 20 }
+                                Text { anchors.centerIn: parent; text: "\u2715  Close"; color: "#8a9bb5"; font.pixelSize: 18 }
                                 Keys.onReturnPressed: libScope.closePanel()
                                 MouseArea { anchors.fill: parent; onClicked: libScope.closePanel() }
                             }
