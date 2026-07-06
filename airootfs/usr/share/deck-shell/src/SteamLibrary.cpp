@@ -279,18 +279,25 @@ void SteamLibraryModel::launchGame(const QString &appId)
 
 void SteamLibraryModel::installGame(const QString &appId)
 {
-    // Look up game name for the toast signal.
     QString name;
     for (const SteamGame &g : m_gamesMerged)
         if (g.appId == appId) { name = g.name; break; }
 
-    // Trigger the Steam install URI. The steam-install-confirm.sh watcher
-    // service running in the background will intercept the dialog that
-    // appears and auto-click "Install" using xdotool, so the user never
-    // sees the confirmation popup.
-    qDebug() << "[SteamLibrary] installGame:" << appId;
-    QProcess::startDetached(QStringLiteral("steam"),
-        { QStringLiteral("steam://install/") + appId });
+    QProcess::startDetached(QStringLiteral("steam"), { QStringLiteral("steam://install/") + appId });
+
+    const QString script = QStringLiteral(R"SH(
+for i in $(seq 1 50); do
+    id=$(niri msg --json windows | jq -r '.[] | select(.app_id=="steam" and .title=="Steam") | .id' | head -n1)
+    if [ -n "$id" ] && [ "$id" != "null" ]; then
+        niri msg action close-window --id "$id"
+        exit 0
+    fi
+    sleep 0.1
+done
+exit 0
+)SH");
+
+    QProcess::startDetached(QStringLiteral("bash"), { QStringLiteral("-lc"), script });
 
     emit installRequested(appId, name);
 }
