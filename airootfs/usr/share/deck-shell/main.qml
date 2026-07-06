@@ -14,6 +14,11 @@ ApplicationWindow {
 
     readonly property string backendUrl: "https://api.accesshomeserver.uk"
 
+    // Set these to a stable writable location on the client.
+    // If this is Steam Deck / SteamOS for the deck user, these are reasonable.
+    readonly property string webDataPath:  "/home/deck/.local/share/deck-shell/webengine"
+    readonly property string webCachePath: "/home/deck/.cache/deck-shell/webengine"
+
     property bool   steamLinked:   false
     property string steamPersona:  ""
     property string steamAvatar:   ""
@@ -24,8 +29,18 @@ ApplicationWindow {
     WebEngineProfile {
         id: deckProfile
         storageName: "DeckShell"
+        offTheRecord: false
         persistentCookiesPolicy: WebEngineProfile.ForcePersistentCookies
         httpCacheType: WebEngineProfile.DiskHttpCache
+        persistentStoragePath: root.webDataPath
+        cachePath: root.webCachePath
+
+        Component.onCompleted: {
+            console.log("deckProfile storageName:", storageName)
+            console.log("deckProfile persistentStoragePath:", persistentStoragePath)
+            console.log("deckProfile cachePath:", cachePath)
+            console.log("deckProfile note: exact cookie jar inspection is not available from pure QML; auth persistence is inferred from /auth/status")
+        }
     }
 
     // ── Hidden status-check view ────────────────────────────────────────────────
@@ -40,35 +55,52 @@ ApplicationWindow {
         function check() {
             if (_pending) return
             _pending = true
+            console.log("statusView requesting:", root.backendUrl + "/auth/status")
+            console.log("statusView checking persisted session using profile path:", root.webDataPath)
             url = root.backendUrl + "/auth/status"
         }
 
         onLoadingChanged: function(info) {
-            // Guard: ignore the about:blank reset and any non-success states
-            if (url.toString() === "about:blank") return
+            console.log("statusView load status:", info.status, "url:", url.toString())
+
+            if (url.toString() === "about:blank")
+                return
+
             if (info.status !== WebEngineView.LoadSucceededStatus) {
+                console.warn("statusView load failed or not successful:", info.status, "url:", url.toString())
                 _pending = false
                 url = "about:blank"
                 return
             }
+
             runJavaScript("document.body.innerText", function(text) {
                 _pending = false
-                url = "about:blank"   // reset BEFORE parse so re-trigger is blocked
+                url = "about:blank"
+
                 var trimmed = (text || "").trim()
+
+                console.log("statusView raw /auth/status reply:", trimmed)
+
                 try {
                     var data = JSON.parse(trimmed)
+
+                    console.log("statusView parsed /auth/status linked:", data.linked)
+                    console.log("statusView parsed /auth/status steamId:", data.steamId || "")
+                    console.log("statusView parsed /auth/status persona:", data.persona || "")
+
                     if (data.linked) {
+                        console.log("statusView result: server accepted a previously stored session cookie")
                         root.steamLinked  = data.linked
-                        root.steamPersona = data.persona  || ""
-                        root.steamAvatar  = data.avatar   || ""
-                        root.steamId      = data.steamId  || ""
+                        root.steamPersona = data.persona || ""
+                        root.steamAvatar  = data.avatar || ""
+                        root.steamId      = data.steamId || ""
                         root.fetchIfNeeded(root.steamId)
+                    } else {
+                        console.warn("statusView result: server did not see a valid previous session cookie")
                     }
-                } catch(e) {
-                    // Log first 300 chars of the raw response so you can see
-                    // what the server actually returned (e.g. HTML error page)
-                    console.warn("statusView parse error. Raw response:",
-                                 trimmed.substring(0, 300))
+                } catch (e) {
+                    console.warn("statusView parse error:", e)
+                    console.warn("statusView raw response head:", trimmed.substring(0, 500))
                 }
             })
         }
