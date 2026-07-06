@@ -2,6 +2,7 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import QtWebEngine 1.10
+import QtCore 6.0
 
 ApplicationWindow {
     id: root
@@ -14,12 +15,10 @@ ApplicationWindow {
 
     readonly property string backendUrl: "https://api.accesshomeserver.uk"
 
-    // FIX: ensure the WebEngine directories exist before the profile tries to
-    // use them.  Qt.createQmlObject is not needed — the dirs are now created
-    // by SteamLibraryModel's constructor (C++ side) before the QML engine
-    // loads, so by the time this file runs they already exist.
-    readonly property string webDataPath:  "/home/deck/.local/share/deck-shell/webengine"
-    readonly property string webCachePath: "/home/deck/.cache/deck-shell/webengine"
+    // Resolve paths dynamically using the real user's home directory so the
+    // app works on any account, not just a hardcoded "deck" user.
+    readonly property string webDataPath:  StandardPaths.writableLocation(StandardPaths.AppLocalDataLocation) + "/webengine"
+    readonly property string webCachePath: StandardPaths.writableLocation(StandardPaths.CacheLocation)        + "/webengine"
 
     property bool   steamLinked:   false
     property string steamPersona:  ""
