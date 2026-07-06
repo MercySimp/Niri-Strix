@@ -96,27 +96,46 @@ ApplicationWindow {
         return (bytes / 1073741824).toFixed(2) + " GB"
     }
 
+    // Convert a raw Unix timestamp string (e.g. "1782681304") to "Mon DD, YYYY"
+    function formatUnixDate(tsStr) {
+        var ts = parseInt(tsStr, 10)
+        if (!ts || ts === 0) return ""
+        var d = new Date(ts * 1000)
+        if (isNaN(d.getTime())) return ""
+        return d.toLocaleDateString(Qt.locale(), "MMM d, yyyy")
+    }
+
+    // Format playtime in minutes -> "X hrs" or "X hrs Y mins"
+    function formatPlaytime(mins) {
+        if (!mins || mins === 0) return ""
+        if (mins < 60) return mins + " mins"
+        var h = Math.floor(mins / 60)
+        var m = mins % 60
+        return m > 0 ? (h + " hrs " + m + " mins") : (h + " hrs")
+    }
+
+    // Fetch Steam news via the ISteamNews GetNewsForApp API (returns JSON, no API key needed)
     function fetchNews(appId, callback) {
         var xhr = new XMLHttpRequest()
         xhr.open("GET",
-            "https://store.steampowered.com/feeds/news/app/" + appId + "/?cc=US&l=english&snr=1_2108_9__2107",
+            "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid=" + appId + "&count=5&maxlength=0",
             true)
         xhr.onreadystatechange = function() {
             if (xhr.readyState !== 4) return
             var items = []
             if (xhr.status === 200) {
-                var text = xhr.responseText
-                var re = /<item>([\/\S\s]*?)<\/item>/g
-                var m
-                while ((m = re.exec(text)) !== null && items.length < 5) {
-                    var block   = m[1]
-                    var titleM  = block.match(/<title><\!\[CDATA\[([^\]]+)\]\]><\/title>/)
-                    var dateM   = block.match(/<pubDate>([^<]+)<\/pubDate>/)
-                    items.push({
-                        title: titleM ? titleM[1] : "Untitled",
-                        date:  dateM  ? dateM[1].substring(0, 16) : ""
-                    })
-                }
+                try {
+                    var json = JSON.parse(xhr.responseText)
+                    var newsitems = json.appnews && json.appnews.newsitems ? json.appnews.newsitems : []
+                    for (var i = 0; i < newsitems.length && i < 5; i++) {
+                        var n = newsitems[i]
+                        var d = new Date(n.date * 1000)
+                        items.push({
+                            title: n.title || "Untitled",
+                            date:  isNaN(d.getTime()) ? "" : d.toLocaleDateString(Qt.locale(), "MMM d, yyyy")
+                        })
+                    }
+                } catch(e) { console.warn("fetchNews parse error:", e) }
             }
             callback(items)
         }
@@ -410,15 +429,15 @@ ApplicationWindow {
                             Text { anchors.centerIn: parent; text: "\u2B07 Not Installed"; color: "#5ba3ff"; font.pixelSize: 13 }
                         }
 
-                        // Only pass roles that actually exist in SteamLibraryModel
                         function openGameDetail() {
                             stack.push(gameDetailPage, {
-                                gameAppId:      appId        || "",
-                                gameName:       name         || "",
-                                gameCover:      coverUrl     || "",
-                                gameInstalled:  gameTile.isInstalled,
-                                gameSizeOnDisk: sizeOnDisk   || 0,
-                                gameLastPlayed: lastPlayed   || ""
+                                gameAppId:          appId              || "",
+                                gameName:           name               || "",
+                                gameCover:          coverUrl           || "",
+                                gameInstalled:      gameTile.isInstalled,
+                                gameSizeOnDisk:     sizeOnDisk         || 0,
+                                gameLastPlayed:     lastPlayed         || "",
+                                gamePlaytime:       playtimeForever    || 0
                             })
                         }
 
@@ -465,14 +484,13 @@ ApplicationWindow {
             height: parent ? parent.height : root.height
             focus: true
 
-            // Properties populated via stack.push(..., { ... })
-            // NOTE: only roles defined in SteamLibraryModel are used here.
             property string gameAppId:      ""
             property string gameName:       ""
             property string gameCover:      ""
             property bool   gameInstalled:  false
             property real   gameSizeOnDisk: 0
-            property string gameLastPlayed: ""
+            property string gameLastPlayed: ""   // raw Unix timestamp string
+            property int    gamePlaytime:   0     // total minutes
 
             property var    newsItems:   []
             property bool   newsLoading: true
@@ -633,12 +651,23 @@ ApplicationWindow {
 
                     Rectangle { width: 1; height: 64; color: "#2a3a55"; opacity: 0.6 }
 
-                    // Last Played stat
+                    // Last Played stat — formatted from Unix timestamp
                     Column {
                         spacing: 4
-                        visible: detailScope.gameLastPlayed !== "" && detailScope.gameLastPlayed !== "0"
+                        visible: {
+                            var lp = detailScope.gameLastPlayed
+                            return lp !== "" && lp !== "0" && parseInt(lp, 10) > 0
+                        }
                         Text { text: "LAST PLAYED"; color: "#8a9bb5"; font.pixelSize: 14; font.bold: true; font.letterSpacing: 1.2 }
-                        Text { text: detailScope.gameLastPlayed; color: "#e8e8e8"; font.pixelSize: 20 }
+                        Text { text: root.formatUnixDate(detailScope.gameLastPlayed); color: "#e8e8e8"; font.pixelSize: 20 }
+                    }
+
+                    // Play Time stat
+                    Column {
+                        spacing: 4
+                        visible: detailScope.gamePlaytime > 0
+                        Text { text: "PLAY TIME"; color: "#8a9bb5"; font.pixelSize: 14; font.bold: true; font.letterSpacing: 1.2 }
+                        Text { text: root.formatPlaytime(detailScope.gamePlaytime); color: "#e8e8e8"; font.pixelSize: 20 }
                     }
 
                     // Install size stat
@@ -668,7 +697,6 @@ ApplicationWindow {
                     id: bodyColumn
                     anchors.left: parent.left; anchors.right: parent.right
                     anchors.leftMargin: 60; anchors.rightMargin: 60
-                    anchors.topMargin: 36
                     y: 36
                     spacing: 40
 
@@ -685,7 +713,6 @@ ApplicationWindow {
 
                         Item {
                             width: parent.width; height: 80
-                            // Placeholder — friend data not yet exposed by SteamLibraryModel
                             Row {
                                 anchors.verticalCenter: parent.verticalCenter; spacing: 12
                                 Rectangle {

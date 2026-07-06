@@ -16,7 +16,8 @@ struct SteamGame {
     QString logoUrl;
     bool    installed;
     qint64  sizeOnDisk;
-    QString lastPlayed;
+    QString lastPlayed;      // raw Unix timestamp string from ACF
+    qint64  playtimeForever; // total playtime in minutes from ACF
 };
 
 class SteamLibraryModel : public QAbstractListModel
@@ -35,7 +36,8 @@ public:
         LogoUrlRole,
         InstalledRole,
         SizeRole,
-        LastPlayedRole
+        LastPlayedRole,
+        PlaytimeForeverRole
     };
 
     enum FilterMode {
@@ -67,7 +69,6 @@ signals:
     void countChanged();
     void errorOccurred(const QString &message);
     void filterModeChanged();
-    // Emitted when installGame() is called so QML can show a toast.
     void installRequested(const QString &appId, const QString &name);
 
 private slots:
@@ -87,7 +88,6 @@ private:
     bool             m_loading        = false;
     int              m_filterMode     = InstalledOnly;
     int              m_installedCount = 0;
-    // Pending steamId for re-merge after auto-refresh
     QString          m_lastSteamId;
 
     QNetworkAccessManager m_nam;

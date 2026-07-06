@@ -98,7 +98,11 @@ SteamGame SteamLibraryModel::parseAppManifest(const QString &acfPath)
 
     g.appId      = vdfValue(lines, "appid");
     g.name       = vdfValue(lines, "name");
-    g.lastPlayed = vdfValue(lines, "LastPlayed");
+    g.lastPlayed = vdfValue(lines, "LastPlayed");  // raw Unix timestamp string
+
+    QString pt   = vdfValue(lines, "playtime_forever");
+    g.playtimeForever = pt.isEmpty() ? 0 : pt.toLongLong();
+
     QString sz   = vdfValue(lines, "SizeOnDisk");
     g.sizeOnDisk = sz.isEmpty() ? 0 : sz.toLongLong();
     g.installed  = !g.appId.isEmpty() && !g.name.isEmpty();
@@ -254,12 +258,13 @@ void SteamLibraryModel::handleLibraryReply(QNetworkReply *reply)
         if (localById.contains(id)) {
             g = localById.value(id);
         } else {
-            g.appId     = id;
-            g.name      = nm;
-            g.installed = false;
-            g.coverUrl  = obj.value(QStringLiteral("coverUrl")).toString(
-                          QStringLiteral("https://cdn.steamstatic.com/steam/apps/%1/library_600x900.jpg").arg(id));
-            g.logoUrl   = QStringLiteral("https://cdn.steamstatic.com/steam/apps/%1/header.jpg").arg(id);
+            g.appId           = id;
+            g.name            = nm;
+            g.installed       = false;
+            g.playtimeForever = 0;
+            g.coverUrl        = obj.value(QStringLiteral("coverUrl")).toString(
+                                QStringLiteral("https://cdn.steamstatic.com/steam/apps/%1/library_600x900.jpg").arg(id));
+            g.logoUrl         = QStringLiteral("https://cdn.steamstatic.com/steam/apps/%1/header.jpg").arg(id);
         }
         merged << g;
     }
@@ -335,13 +340,14 @@ QVariant SteamLibraryModel::data(const QModelIndex &index, int role) const
 
     if (!g) return {};
     switch (role) {
-    case AppIdRole:      return g->appId;
-    case NameRole:       return g->name;
-    case CoverUrlRole:   return g->coverUrl;
-    case LogoUrlRole:    return g->logoUrl;
-    case InstalledRole:  return g->installed;
-    case SizeRole:       return g->sizeOnDisk;
-    case LastPlayedRole: return g->lastPlayed;
+    case AppIdRole:           return g->appId;
+    case NameRole:            return g->name;
+    case CoverUrlRole:        return g->coverUrl;
+    case LogoUrlRole:         return g->logoUrl;
+    case InstalledRole:       return g->installed;
+    case SizeRole:            return g->sizeOnDisk;
+    case LastPlayedRole:      return g->lastPlayed;
+    case PlaytimeForeverRole: return g->playtimeForever;
     }
     return {};
 }
@@ -349,12 +355,13 @@ QVariant SteamLibraryModel::data(const QModelIndex &index, int role) const
 QHash<int, QByteArray> SteamLibraryModel::roleNames() const
 {
     return {
-        { AppIdRole,      "appId"      },
-        { NameRole,       "name"       },
-        { CoverUrlRole,   "coverUrl"   },
-        { LogoUrlRole,    "logoUrl"    },
-        { InstalledRole,  "installed"  },
-        { SizeRole,       "sizeOnDisk" },
-        { LastPlayedRole, "lastPlayed" },
+        { AppIdRole,           "appId"           },
+        { NameRole,            "name"             },
+        { CoverUrlRole,        "coverUrl"         },
+        { LogoUrlRole,         "logoUrl"          },
+        { InstalledRole,       "installed"        },
+        { SizeRole,            "sizeOnDisk"       },
+        { LastPlayedRole,      "lastPlayed"       },
+        { PlaytimeForeverRole, "playtimeForever"  },
     };
 }
