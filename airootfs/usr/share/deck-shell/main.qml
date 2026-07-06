@@ -21,8 +21,6 @@ ApplicationWindow {
     property string lastFetchedId: ""
 
     // ── Shared persistent profile ───────────────────────────────────────────────
-    // All WebEngineViews share this profile so deck_session is written to
-    // disk and survives app restarts.
     WebEngineProfile {
         id: deckProfile
         storageName: "DeckShell"
@@ -30,11 +28,7 @@ ApplicationWindow {
         httpCacheType: WebEngineProfile.DiskHttpCache
     }
 
-    // ── Hidden status-check view ────────────────────────────────────────────
-    // XHR runs in QML’s own network stack (no access to the WebEngine
-    // cookie jar), so we use a tiny hidden WebEngineView to hit
-    // /auth/status and scrape the JSON via runJavaScript. This ensures
-    // the persistent deck_session cookie is sent on every cold-start.
+    // ── Hidden status-check view ────────────────────────────────────────────────
     WebEngineView {
         id: statusView
         profile: deckProfile
@@ -50,11 +44,19 @@ ApplicationWindow {
         }
 
         onLoadingChanged: function(info) {
-            if (info.status !== WebEngineView.LoadSucceededStatus) return
+            // Guard: ignore the about:blank reset and any non-success states
+            if (url.toString() === "about:blank") return
+            if (info.status !== WebEngineView.LoadSucceededStatus) {
+                _pending = false
+                url = "about:blank"
+                return
+            }
             runJavaScript("document.body.innerText", function(text) {
                 _pending = false
+                url = "about:blank"   // reset BEFORE parse so re-trigger is blocked
+                var trimmed = (text || "").trim()
                 try {
-                    var data = JSON.parse(text)
+                    var data = JSON.parse(trimmed)
                     if (data.linked) {
                         root.steamLinked  = data.linked
                         root.steamPersona = data.persona  || ""
@@ -62,8 +64,12 @@ ApplicationWindow {
                         root.steamId      = data.steamId  || ""
                         root.fetchIfNeeded(root.steamId)
                     }
-                } catch(e) { console.warn("statusView parse error:", e) }
-                url = "about:blank"
+                } catch(e) {
+                    // Log first 300 chars of the raw response so you can see
+                    // what the server actually returned (e.g. HTML error page)
+                    console.warn("statusView parse error. Raw response:",
+                                 trimmed.substring(0, 300))
+                }
             })
         }
     }
@@ -171,7 +177,7 @@ ApplicationWindow {
         SteamLibraryCtrl.refresh()
     }
 
-    // ── Install toast ─────────────────────────────────────────────────────────────
+    // ── Install toast ────────────────────────────────────────────────────────────
     Rectangle {
         id: installToast
         z: 100
@@ -235,7 +241,7 @@ ApplicationWindow {
         initialItem: homePage
     }
 
-    // ── In-app article viewer popup ───────────────────────────────────────────────
+    // ── In-app article viewer popup ──────────────────────────────────────────────
     Rectangle {
         id: articlePopup
         z: 200
@@ -338,7 +344,7 @@ ApplicationWindow {
         Keys.onEscapePressed: articlePopup.close()
     }
 
-    // ══ HOME ═════════════════════════════════════════════════════════════════════════
+    // ══ HOME ═══════════════════════════════════════════════════════════════════════
     Component {
         id: homePage
         FocusScope {
@@ -415,7 +421,7 @@ ApplicationWindow {
         }
     }
 
-    // ══ LIBRARY ════════════════════════════════════════════════════════════════════════
+    // ══ LIBRARY ════════════════════════════════════════════════════════════════════
     Component {
         id: libraryPage
         FocusScope {
@@ -602,7 +608,7 @@ ApplicationWindow {
         }
     }
 
-    // ══ GAME DETAIL PAGE ═══════════════════════════════════════════════════════════════════
+    // ══ GAME DETAIL PAGE ═══════════════════════════════════════════════════════════
     Component {
         id: gameDetailPage
         FocusScope {
@@ -1013,7 +1019,7 @@ ApplicationWindow {
         }
     }
 
-    // ══ STORE ═════════════════════════════════════════════════════════════════════════
+    // ══ STORE ══════════════════════════════════════════════════════════════════════
     Component {
         id: storePage
         FocusScope {
@@ -1041,7 +1047,7 @@ ApplicationWindow {
         }
     }
 
-    // ══ SETTINGS ═════════════════════════════════════════════════════════════════════════
+    // ══ SETTINGS ═══════════════════════════════════════════════════════════════════
     Component {
         id: settingsPage
         FocusScope {
@@ -1098,7 +1104,7 @@ ApplicationWindow {
         }
     }
 
-    // ══ POWER ═════════════════════════════════════════════════════════════════════════
+    // ══ POWER ══════════════════════════════════════════════════════════════════════
     Component {
         id: powerPage
         FocusScope {
