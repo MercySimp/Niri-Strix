@@ -14,11 +14,8 @@ ApplicationWindow {
 
     readonly property string backendUrl: "https://api.accesshomeserver.uk"
 
-    // Paths are injected from C++ via QStandardPaths (main.cpp) as context
-    // properties: webDataPath and webCachePath.  This avoids hardcoding any
-    // username AND avoids the unreliable QtCore 6.0 StandardPaths QML singleton.
-    // The C++ side also calls QDir().mkpath() on both before the engine loads,
-    // so the directories always exist before Chromium's renderer subprocess starts.
+    // Paths injected from C++ via QStandardPaths context properties.
+    // Directories are pre-created in main.cpp before the engine loads.
 
     property bool   steamLinked:   false
     property string steamPersona:  ""
@@ -27,10 +24,6 @@ ApplicationWindow {
     property string lastFetchedId: ""
 
     // ── Shared persistent profile ───────────────────────────────────────────────
-    // storageName is set last in Component.onCompleted — this is the trigger
-    // that switches the profile from off-the-record to disk-based mode.
-    // Setting persistentStoragePath and cachePath first prevents the
-    // FILE_ERROR_ACCESS_DENIED / "Storage name is empty" cascade.
     WebEngineProfile {
         id: deckProfile
         offTheRecord: false
@@ -42,10 +35,33 @@ ApplicationWindow {
             cachePath             = webCachePath
             storageName           = "DeckShell"
 
-            console.log("deckProfile storageName:", storageName)
-            console.log("deckProfile persistentStoragePath:", persistentStoragePath)
-            console.log("deckProfile cachePath:", cachePath)
-            console.log("deckProfile note: exact cookie jar inspection is not available from pure QML; auth persistence is inferred from /auth/status")
+            console.log("[profile] storageName:", storageName)
+            console.log("[profile] persistentStoragePath:", persistentStoragePath)
+            console.log("[profile] cachePath:", cachePath)
+            console.log("[profile] persistentCookiesPolicy:", persistentCookiesPolicy,
+                        "(2 = ForcePersistentCookies)")
+            console.log("[profile] offTheRecord:", offTheRecord)
+
+            // Dump whatever cookies the profile already has on disk from a
+            // previous session so we can confirm persistence is loading them.
+            deckProfile.cookieStore.loadAllCookies()
+        }
+
+        cookieStore.onCookieAdded: function(cookie) {
+            console.log("[cookie] ADDED   domain=", cookie.domain,
+                        "name=",   cookie.name,
+                        "path=",   cookie.path,
+                        "secure=", cookie.secure,
+                        "httpOnly=",cookie.httpOnly,
+                        "expires=", cookie.expirationDate,
+                        "value=",  cookie.value)
+            console.log("[cookie] >>> saving to disk at:", webDataPath)
+        }
+
+        cookieStore.onCookieRemoved: function(cookie) {
+            console.log("[cookie] REMOVED domain=", cookie.domain,
+                        "name=",   cookie.name,
+                        "path=",   cookie.path)
         }
     }
 
@@ -61,19 +77,29 @@ ApplicationWindow {
         function check() {
             if (_pending) return
             _pending = true
-            console.log("statusView requesting:", root.backendUrl + "/auth/status")
-            console.log("statusView checking persisted session using profile path:", webDataPath)
+
+            // Snapshot cookies before the request so we can see what will be sent.
+            console.log("[statusView] ── pre-request cookie snapshot ──")
+            deckProfile.cookieStore.loadAllCookies()
+
+            console.log("[statusView] requesting:", root.backendUrl + "/auth/status")
+            console.log("[statusView] profile path:", webDataPath)
+            console.log("[statusView] profile storageName:", deckProfile.storageName)
+            console.log("[statusView] offTheRecord:", deckProfile.offTheRecord)
             url = root.backendUrl + "/auth/status"
         }
 
         onLoadingChanged: function(info) {
-            console.log("statusView load status:", info.status, "url:", url.toString())
+            console.log("[statusView] load status:", info.status,
+                        "(1=Loading 2=Stopped 3=Succeeded 4=Failed)",
+                        "url:", url.toString())
 
             if (url.toString() === "about:blank")
                 return
 
             if (info.status !== WebEngineView.LoadSucceededStatus) {
-                console.warn("statusView load failed or not successful:", info.status, "url:", url.toString())
+                console.warn("[statusView] load failed status:", info.status,
+                             "url:", url.toString())
                 _pending = false
                 url = "about:blank"
                 return
@@ -84,29 +110,39 @@ ApplicationWindow {
                 url = "about:blank"
 
                 var trimmed = (text || "").trim()
+                console.log("[statusView] raw /auth/status reply:", trimmed)
 
-                console.log("statusView raw /auth/status reply:", trimmed)
+                // Also dump the Set-Cookie header echo via JS
+                runJavaScript(
+                    "(function(){"
+                    +"try{var r=document.cookie;return r||'(no document.cookie)';}"
+                    +"catch(e){return 'err:'+e;}})();",
+                    function(dc) {
+                        console.log("[statusView] document.cookie after load:", dc)
+                    }
+                )
 
                 try {
                     var data = JSON.parse(trimmed)
-
-                    console.log("statusView parsed /auth/status linked:", data.linked)
-                    console.log("statusView parsed /auth/status steamId:", data.steamId || "")
-                    console.log("statusView parsed /auth/status persona:", data.persona || "")
+                    console.log("[statusView] parsed linked:",  data.linked)
+                    console.log("[statusView] parsed steamId:", data.steamId || "")
+                    console.log("[statusView] parsed persona:", data.persona || "")
 
                     if (data.linked) {
-                        console.log("statusView result: server accepted a previously stored session cookie")
+                        console.log("[statusView] ✔ server accepted stored session cookie")
                         root.steamLinked  = data.linked
                         root.steamPersona = data.persona || ""
-                        root.steamAvatar  = data.avatar || ""
+                        root.steamAvatar  = data.avatar  || ""
                         root.steamId      = data.steamId || ""
                         root.fetchIfNeeded(root.steamId)
                     } else {
-                        console.warn("statusView result: server did not see a valid previous session cookie")
+                        console.warn("[statusView] ✘ server did not see a valid session cookie")
+                        console.warn("[statusView] hint: cookie may not have been persisted,"
+                                    + " or storageName was set after the profile was already used")
                     }
                 } catch (e) {
-                    console.warn("statusView parse error:", e)
-                    console.warn("statusView raw response head:", trimmed.substring(0, 500))
+                    console.warn("[statusView] parse error:", e)
+                    console.warn("[statusView] raw head:", trimmed.substring(0, 500))
                 }
             })
         }
@@ -132,21 +168,32 @@ ApplicationWindow {
     }
 
     function handleLoginDone(urlStr) {
+        console.log("[auth] handleLoginDone url:", urlStr)
         var persona = getParam(urlStr, "persona")
         var avatar  = getParam(urlStr, "avatar")
         var sid     = getParam(urlStr, "steamid")
+        console.log("[auth] parsed persona:", persona, "steamid:", sid)
+
+        // Dump cookies immediately after login redirect so we can confirm
+        // the session cookie was set before we navigate away.
+        console.log("[auth] ── post-login cookie snapshot ──")
+        deckProfile.cookieStore.loadAllCookies()
+
         if (persona !== "") {
+            console.log("[auth] login succeeded via redirect params, setting state")
             steamLinked  = true
             steamPersona = persona
             steamAvatar  = avatar
             steamId      = sid
             fetchIfNeeded(sid)
         } else {
+            console.log("[auth] no params in redirect, falling back to statusView.check()")
             statusView.check()
         }
     }
 
     function doLogout() {
+        console.log("[auth] doLogout called, clearing session")
         var xhr = new XMLHttpRequest()
         xhr.open("POST", backendUrl + "/auth/logout", true)
         xhr.withCredentials = true
@@ -972,13 +1019,17 @@ ApplicationWindow {
                 anchors.fill: parent; visible: false; url: "about:blank"
                 onUrlChanged: {
                     var u = url.toString()
+                    console.log("[loginWebView] urlChanged:", u)
                     if (u.includes("/auth/steam/done") || u.includes("/auth/steam/callback")) {
+                        console.log("[loginWebView] detected auth callback, closing view")
                         visible = false; url = "about:blank"
                         root.handleLoginDone(u)
                     }
                 }
                 onLoadingChanged: function(info) {
+                    console.log("[loginWebView] load status:", info.status, "url:", url.toString())
                     if (info.status === WebEngineView.LoadFailedStatus) {
+                        console.warn("[loginWebView] load FAILED")
                         loginErrText.visible = true; visible = false
                     }
                 }
@@ -1044,6 +1095,7 @@ ApplicationWindow {
                         Keys.onReturnPressed: openSteamLogin()
                         MouseArea { anchors.fill: parent; onClicked: parent.openSteamLogin() }
                         function openSteamLogin() {
+                            console.log("[auth] opening Steam login:", root.backendUrl + "/auth/steam")
                             loginErrText.visible = false
                             loginWebView.url = root.backendUrl + "/auth/steam"
                             loginWebView.visible = true; loginWebView.forceActiveFocus()
