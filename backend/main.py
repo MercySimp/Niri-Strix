@@ -16,21 +16,47 @@ POST /system/power        → {action: shutdown|reboot|suspend}
 
 import os
 import re
+import secrets
 import subprocess
+import warnings
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
 
 import httpx
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 # ---------------------------------------------------------------------------
+# Load .env FIRST — must happen before any os.environ.get() calls
+# ---------------------------------------------------------------------------
+load_dotenv()
+
+# ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-SECRET_KEY    = os.environ.get("DECK_SECRET", "change_me_in_production")
+
+# DECK_SECRET signs every session cookie.  It MUST be a fixed, stable value
+# stored in .env — if it changes between server restarts every existing
+# cookie becomes invalid and all users are logged out.
+#
+# If .env is missing the key we generate a random one for this process only
+# (so at least the current session works) and print a loud warning so the
+# operator knows to set it permanently.
+_raw_secret = os.environ.get("DECK_SECRET", "")
+if not _raw_secret:
+    _raw_secret = secrets.token_hex(32)
+    warnings.warn(
+        "DECK_SECRET is not set in .env — a random key was generated for this "
+        "process only.  Every time the server restarts users will be logged out. "
+        "Add  DECK_SECRET=<long-random-string>  to your .env file to fix this.",
+        stacklevel=1,
+    )
+SECRET_KEY = _raw_secret
+
 STEAM_API_KEY = os.environ.get("STEAM_API_KEY", "")
 BACKEND_URL   = os.environ.get("BACKEND_URL", "https://api.accesshomeserver.uk")
 STEAM_USER    = os.environ.get("STEAM_USER", "")
@@ -49,7 +75,7 @@ REALM           = BACKEND_URL
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
-app = FastAPI(title="Deck Shell API", version="0.7.0")
+app = FastAPI(title="Deck Shell API", version="0.7.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -63,7 +89,12 @@ app.add_middleware(
     secret_key=SECRET_KEY,
     session_cookie="deck_session",
     max_age=SESSION_MAX_AGE,
-    https_only=True,
+    # https_only=True would drop the cookie on any plain-HTTP leg (e.g. a
+    # reverse-proxy that terminates TLS before uvicorn).  The cookie is still
+    # httponly + samesite=lax so it is not accessible from JS and is not sent
+    # on cross-site requests.  If uvicorn is exposed directly on HTTPS with no
+    # proxy in front, you can re-enable https_only.
+    https_only=False,
     same_site="lax",
 )
 
@@ -204,7 +235,7 @@ async def auth_status(request: Request):
             value=request.cookies.get("deck_session", ""),
             max_age=SESSION_MAX_AGE,
             httponly=True,
-            secure=True,
+            secure=False,   # must match https_only above
             samesite="lax",
         )
 
